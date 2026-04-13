@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//data2/t113c52027/seg_lidar/output/test_2026-03-23-10-42-37/**)",
+      "Bash(mkdir -p /data2/t113c52027/occ_gt_v2/cvpr_format_occ_gen_u5test)",
+      "Bash(cp -r /data2/t113c52027/occ_gt_v2/cvpr_format_occ_gen_u5/pose_backends /data2/t113c52027/occ_gt_v2/cvpr_format_occ_gen_u5test/)",
+      "Bash(cp /data2/t113c52027/occ_gt_v2/cvpr_format_occ_gen_u5/u5_box_utils.py /data2/t113c52027/occ_gt_v2/cvpr_format_occ_gen_u5test/)"
+    ]
+  }
+}

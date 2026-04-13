@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ':*)",
+      "Bash(git config:*)",
+      "Bash(git branch:*)",
+      "Bash(git remote:*)",
+      "Bash(git -C /data2/t113c52027/occ_gt_v2 config user.name \"AmazingWilson-hub\")",
+      "Bash(git -C /data2/t113c52027/occ_gt_v2 config user.email \"amazingwilson123@gmail.com\")",
+      "Bash(git -C /data2/t113c52027/occ_gt_v2 branch -m main)",
+      "Bash(git -C /data2/t113c52027/occ_gt_v2 remote add origin https://github.com/AmazingWilson-hub/occ_gt_v2.git)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git config user.name \"AmazingWilson-hub\")",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git config user.email \"amazingwilson123@gmail.com\")",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git remote add origin https://github.com/AmazingWilson-hub/occ_gt_v2.git)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git add -A)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git commit -m \"Initial commit\")",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git push -u origin master)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git status --short)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git diff --cached --name-only)",
+      "Bash(grep \"\\\\.py$\\\\|\\\\.md$\\\\|\\\\.json$\\\\|\\\\.txt$\\\\|\\\\.sh$\\\\|\\\\.yaml$\\\\|\\\\.yml$\")",
+      "Bash(grep \"\\\\.py$\")",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git ls-files)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git commit -m \"Remove output/data files, keep code only\")",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git push origin master)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git checkout --orphan clean-main)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git commit -m \"Initial commit \\(code only\\)\")"
+    ]
+  }
+}

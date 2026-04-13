@@ -1,0 +1,24 @@
+# Large data directories
+data/
+
+# Output directories
+*/output/
+output/
+
+# Video files
+*.mp4
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+venv/
+env/
+
+# OS
+.DS_Store
