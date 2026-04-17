@@ -10,7 +10,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 # 加入 pose_estimation 路徑
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'pose_estimation'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'estimation', 'pose_estimation'))
 
 
 def get_pose_dict(nusc, scene_name):

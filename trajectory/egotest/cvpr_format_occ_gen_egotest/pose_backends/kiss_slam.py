@@ -11,7 +11,7 @@ import sys
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'pose_estimation'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'estimation', 'pose_estimation'))
 
 
 def _compute_timestamps(points):

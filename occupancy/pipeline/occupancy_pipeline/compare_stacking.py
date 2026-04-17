@@ -15,7 +15,7 @@ import open3d as o3d
 from tqdm import tqdm
 
 # Add presentation_exporter to path for utils
-sys.path.insert(0, '/home/t113c52027/t113c52027/occ_gt_v2/presentation_exporter')
+sys.path.insert(0, '/data2/t113c52027/occ_gt_v2/tools/presentation_exporter')
 from utils.points_process import translate, rotate, transform
 
 # NuScenes colors (0-31)

@@ -11,7 +11,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 # 加入 pose_estimation 路徑（為了取得 cs_record 和 GPS 修正工具）
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'pose_estimation'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'trajectory', 'estimation', 'pose_estimation'))
 
 
 def _compute_timestamps(points):

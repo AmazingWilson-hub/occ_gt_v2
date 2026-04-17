@@ -20,7 +20,7 @@ from scipy.spatial.transform import Rotation
 from scipy.optimize import least_squares
 from tqdm import tqdm
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'pose_estimation'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'trajectory', 'estimation', 'pose_estimation'))
 
 
 # ───── Pose Graph Optimization ─────

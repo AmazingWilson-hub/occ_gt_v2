@@ -19,7 +19,7 @@ from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
 # 加入共用模組路徑
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'cvpr_format_occ_gen'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'occupancy', 'nuscenes', 'v1'))
 
 DATAROOT = '/home/t113c52027/t113c52027/occ_gt_v2/data/nuscenes_occ'
 

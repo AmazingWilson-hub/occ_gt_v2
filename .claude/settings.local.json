@@ -24,7 +24,14 @@
       "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git push origin master)",
       "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git checkout --orphan clean-main)",
       "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git commit -m \"Initial commit \\(code only\\)\")",
-      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git push origin clean-main:master --force)"
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git push origin clean-main:master --force)",
+      "Bash(ls -d /data2/t113c52027/occ_gt_v2/cvpr_format_occ_gen*)",
+      "Bash(sed -i 's|'\\\\''\\\\.\\\\.'\\\\'', '\\\\''cvpr_format_occ_gen'\\\\''\\)|'\\\\''..'\\\\'', '\\\\''v1'\\\\''\\)|g' /data2/t113c52027/occ_gt_v2/occupancy/nuscenes/v3/generate.py /data2/t113c52027/occ_gt_v2/occupancy/nuscenes/v4/generate.py)",
+      "Bash(sed -i 's|'\\\\''\\\\.\\\\.'\\\\'', '\\\\''cvpr_format_occ_gen_egotest'\\\\''\\)|'\\\\''..'\\\\'', '\\\\''..'\\\\'', '\\\\''..'\\\\'', '\\\\''trajectory'\\\\'', '\\\\''egotest'\\\\'', '\\\\''cvpr_format_occ_gen_egotest'\\\\''\\)|g' /data2/t113c52027/occ_gt_v2/occupancy/nuscenes/v3/generate.py /data2/t113c52027/occ_gt_v2/occupancy/nuscenes/v4/generate.py /data2/t113c52027/occ_gt_v2/occupancy/nuscenes/v4/compare_video.py)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git log --oneline -3)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git log --oneline origin/master -3)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git commit -m \"Reorganize project structure: occupancy/trajectory/lane_line/tools\")",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git push origin clean-main:master)"
     ]
   }
 }

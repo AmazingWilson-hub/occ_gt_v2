@@ -13,7 +13,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd /data2/t113c52027/occ_gt_v2 && GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git add -A && GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git diff --cached --quiet || (GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git commit -m \"Auto backup $(date '+%Y-%m-%d %H:%M')\" && GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git push origin clean-main:master) 2>/dev/null || true",
+            "command": "export GIT_DIR=/data2/t113c52027/occ_gt_v2/.git && export GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 && git add -A && git diff --cached --quiet || (DIFF=$(git diff --cached --stat) && MSG=$(echo \"Summarize these code changes into one concise git commit message (under 72 chars, no quotes):\\n$DIFF\" | claude -p 2>/dev/null) && git commit -m \"${MSG:-Auto backup $(date '+%Y-%m-%d %H:%M')}\" && git push origin clean-main:master) 2>/dev/null || true",
             "async": true
           }
         ]

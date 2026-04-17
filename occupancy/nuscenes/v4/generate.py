@@ -18,8 +18,8 @@ from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
 # Add paths to use existing components
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'cvpr_format_occ_gen'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'cvpr_format_occ_gen_egotest'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'v1'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'trajectory', 'egotest', 'cvpr_format_occ_gen_egotest'))
 
 DATAROOT = '/home/t113c52027/t113c52027/occ_gt_v2/data/nuscenes_occ'
 

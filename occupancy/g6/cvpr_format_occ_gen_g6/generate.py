@@ -12,7 +12,7 @@ from multiprocessing import Pool, cpu_count
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'pose_backends'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'cvpr_format_occ_gen_elan'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'elan', 'cvpr_format_occ_gen_elan'))
 from elan_box_utils import fill_box_interior, points_in_boxes
 
 GT_BOUNDS = [-40.0, -40.0, -3.0, 40.0, 40.0, 5.4]

@@ -13,7 +13,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'pose_estimation'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'trajectory', 'estimation', 'pose_estimation'))
 
 
 def get_pose_dict(nusc, scene_name, voxel_size=0.5, max_range=80.0, gps_hz=1.0):
