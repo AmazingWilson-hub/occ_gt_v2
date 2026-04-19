@@ -19,7 +19,7 @@
 \maketitle
 
 \begin{abstract}
-This paper extends a prior auto-labeling pipeline for projected semantic labeling and Bird's-Eye-View (BEV) map generation by replacing the front-end semantic labeling module with a stronger multi-view segmentation and projection framework. The proposed system combines YOLOv7, SAM~3, and a GPT-4o-based prompt-refinement loop to produce more complete image-space semantics for both dynamic agents and static scene elements. These semantics are then projected into LiDAR space through explicit camera--LiDAR calibration, fused across views and frames, and rasterized into semantic BEV maps. We use Segment Anything in LiDAR (SAL) as the primary baseline because it follows a similar 2D-to-3D auto-labeling paradigm. Under the shared super-class projected-label protocol adopted in this paper, the proposed method improves mIoU from 52.6\% to 58.7\% on the nuScenes validation split. In the Taiwan examples, the resulting BEV visualizations are also qualitatively cleaner. These results suggest that strengthening the 2D semantic front-end, together with projection and fusion, can improve downstream 3D pseudo-label quality in projection-based BEV pipelines. The same accumulated semantic point cloud is also rasterized into a $200\times200\times16$ 3D occupancy grid; with ground-truth ego poses the pipeline achieves 72.27\% mIoU on nuScenes, and 58.20\% with KISS-SLAM estimated poses, demonstrating practical occupancy label generation without ground-truth localization.
+This paper presents an extension to a prior auto-labeling pipeline for projected semantic labeling and Bird's-Eye-View (BEV) map generation. The proposed method replaces the original front-end semantic labeling module with a stronger multi-view segmentation and projection framework that combines YOLOv7, SAM~3, and a GPT-4o-guided prompt-refinement loop to improve image-space semantics for both dynamic agents and static scene elements. The refined semantics are projected into LiDAR space through explicit camera--LiDAR calibration, fused across views and frames, and rasterized into semantic BEV maps. Segment Anything in LiDAR (SAL) is adopted as the primary baseline because it follows a comparable 2D-to-3D auto-labeling paradigm. Under the shared super-class projected-label protocol used in this study, the proposed method improves mIoU on the nuScenes validation split from 52.6\% to 58.7\%. Qualitative results on Taiwan traffic scenes further show cleaner and more coherent BEV visualizations. These findings indicate that improving the 2D semantic front-end, together with calibration-based projection and multi-view fusion, can substantially enhance downstream 3D pseudo-label quality in projection-based BEV pipelines. The same accumulated semantic point cloud is also rasterized into a $200\times200\times16$ 3D occupancy grid; with ground-truth ego poses, the pipeline achieves 72.27\% mIoU on nuScenes, and with KISS-SLAM estimated poses it achieves 58.20\%, demonstrating practical occupancy label generation without ground-truth localization.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -31,7 +31,7 @@ Reliable BEV and occupancy representations are fundamental for autonomous drivin
 
 Auto-labeling has therefore become an attractive alternative. The core idea is to obtain strong semantic cues in the image domain and transfer them to 3D through camera--LiDAR calibration. This strategy is particularly valuable for generating semantic point clouds, occupancy grids, and BEV maps without fully manual 3D annotation. Nevertheless, the quality of the final BEV output still depends heavily on the quality of the upstream 2D semantic masks. In practice, errors such as missed distant objects, merged scooters, fragmented roadside structures, and unstable boundaries are often propagated into the projected point cloud and later into the BEV raster.
 
-This issue becomes more severe under domain shift. Public datasets such as nuScenes~\cite{nuscenes}, Zenseact Open Dataset~\cite{tbd_zod}, and SemanticKITTI~\cite{tbd_semantickitti} are important benchmarks, but they do not fully capture the traffic patterns of Taiwan, where dense scooters, narrow alleys, and heavy roadside signage frequently produce small, distant, and partially occluded instances. Furthermore, real-world deployment datasets often lack ground-truth ego poses, making multi-frame point cloud accumulation---a key step for dense occupancy label generation---dependent on estimated localization. Figure~\ref{fig:taiwan-vs-public} illustrates the type of mixed-traffic scene that motivates this work.
+This issue becomes more severe under domain shift. Public datasets such as nuScenes~\cite{nuscenes}, Zenseact Open Dataset~\cite{tbd_zod}, and SemanticKITTI~\cite{tbd_semantickitti} are important benchmarks, but they do not fully capture the traffic patterns of Taiwan, where dense scooters, narrow alleys, and heavy roadside signage frequently produce small, distant, and partially occluded instances. Furthermore, real-world deployment datasets often lack ground-truth ego poses, making multi-frame point cloud accumulation---a key step for dense occupancy label generation---dependent on estimated ego localization. Figure~\ref{fig:taiwan-vs-public} illustrates the type of mixed-traffic scene that motivates this work.
 
 \begin{figure}[t]
   \centering
@@ -47,7 +47,7 @@ The main contributions of this extension are as follows:
   \item We upgrade the 2D semantic module in an existing auto-labeling pipeline for projected semantic labeling and BEV map generation with a stronger front-end built from YOLOv7, SAM~3, and GPT-4o-guided prompt refinement.
   \item We introduce a calibration-based multi-view projection and fallback mechanism that fuses refined image semantics into a semantic LiDAR representation while preserving non-projected points as an auxiliary \emph{Potential Obstacle} label.
   \item Under a shared projected-label protocol, we show that the proposed front-end and projection pipeline improve projected semantic point-cloud quality over SAL and produce qualitatively cleaner BEV visualizations.
-  \item We extend the pipeline to generate dense 3D semantic occupancy labels via adaptive multi-frame LiDAR accumulation, dynamic object volume filling, and a pose estimation module that supports datasets without ground-truth localization, achieving 72.27\% mIoU (GT pose) and 58.20\% mIoU (KISS-SLAM) on nuScenes.
+  \item We extend the pipeline to generate dense 3D semantic occupancy labels via adaptive multi-frame LiDAR accumulation, dynamic object volume filling, and a pose estimation module that supports datasets without ground-truth localization, achieving 72.27\% mIoU with GT poses and 58.20\% with KISS-SLAM on nuScenes.
 \end{itemize}
 
 \section{Related Work}
@@ -62,7 +62,7 @@ Projection-based BEV mapping lifts semantic information from camera space into L
 
 \section{Methodology}
 \subsection{System Overview}
-Figure~\ref{fig:system-overview} summarizes the extended pipeline. The framework contains three stages: (1) image-space semantic segmentation and refinement, (2) camera-to-LiDAR semantic projection and fusion, and (3) semantic BEV map generation, with optional occupancy rasterization, from the resulting semantic point cloud.
+Figure~\ref{fig:system-overview} summarizes the extended pipeline. The framework contains three stages: (1) image-space semantic segmentation and refinement, (2) camera-to-LiDAR semantic projection and fusion, and (3) downstream semantic BEV map generation and 3D occupancy label generation from the resulting semantic point cloud.
 
 \begin{figure}[t]
   \centering
@@ -195,6 +195,33 @@ For \emph{dynamic objects} (vehicles, pedestrians, etc.), ego-motion compensatio
 
 \textbf{Ego pose estimation for datasets without ground-truth localization.} Multi-frame accumulation requires accurate ego poses to transform past and future sweeps into the current frame. On nuScenes this is straightforward because ground-truth ego poses are provided. However, the custom Taiwan dataset does not supply ground-truth localization, which is a common constraint in real-world deployment. To address this, we evaluate several pose estimation backends as drop-in replacements: (i)~\emph{IMU dead reckoning}, which integrates CAN-bus acceleration and orientation but accumulates drift rapidly; (ii)~\emph{LiDAR ICP}, which estimates relative poses by sequential point-to-plane ICP between consecutive scans; (iii)~\emph{GPS+IMU EKF fusion}, which corrects IMU drift using GPS absolute position via an Extended Kalman Filter; and (iv)~\emph{full fusion}, which combines ICP-derived relative poses with EKF-corrected GPS positions to achieve sub-metre translation error. On nuScenes, KISS-SLAM is used as a representative learned odometry backend to simulate the no-GT-pose condition. For the custom Taiwan dataset, which provides neither GT ego poses nor loop-closure constraints, we adopt KISS-SLAM combined with GPS position fusion as the practical pose backend, as this combination provides the best trade-off between drift suppression and deployment simplicity. The choice of pose backend directly affects occupancy label quality because drift causes misalignment between accumulated sweeps, producing ghost voxels in static regions and blurred object boundaries.
 
+Figure~\ref{fig:occ-bev} shows a representative occupancy BEV visualization on nuScenes, where each cell is colored by its majority semantic class. Figure~\ref{fig:occ-sweep} compares single-frame versus 40-frame accumulation, illustrating how longer stacking substantially densifies the occupancy grid and reduces empty voxels in road and structure regions. Figure~\ref{fig:occ-pose} shows the effect of pose estimation quality: GT poses produce sharp, well-aligned voxel boundaries, while KISS-SLAM poses introduce mild misalignment in regions far from the ego vehicle.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{occ_bev_visualization.png}
+  \caption{Representative semantic occupancy BEV on nuScenes. Each cell is colored by its majority semantic class using the 17-class label set. Empty (free) voxels are shown in black.}
+  \label{fig:occ-bev}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \subfloat[1 sweep]{\includegraphics[width=0.49\linewidth]{occ_sweep_1.png}\label{fig:occ-sweep-1}}
+  \hfill
+  \subfloat[40 sweeps]{\includegraphics[width=0.49\linewidth]{occ_sweep_40.png}\label{fig:occ-sweep-40}}
+  \caption{Effect of multi-frame accumulation on occupancy density. A single sweep leaves large empty regions, while stacking 40 sweeps substantially fills road and structure areas.}
+  \label{fig:occ-sweep}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \subfloat[GT pose]{\includegraphics[width=0.49\linewidth]{occ_pose_gt.png}\label{fig:occ-pose-gt}}
+  \hfill
+  \subfloat[KISS-SLAM pose]{\includegraphics[width=0.49\linewidth]{occ_pose_kiss.png}\label{fig:occ-pose-kiss}}
+  \caption{Effect of ego pose quality on occupancy label accuracy. GT poses produce sharp voxel boundaries, while KISS-SLAM estimated poses introduce mild misalignment in regions far from the ego vehicle.}
+  \label{fig:occ-pose}
+\end{figure}
+
 The resulting $200 \times 200 \times 16$ occupancy tensor is evaluated against the nuScenes ground truth using the \texttt{mask\_lidar} field to restrict comparison to LiDAR-visible voxels.
 
 \section{Experiments}
@@ -292,11 +319,11 @@ The next question is how the downstream BEV evolves from raw projected semantic 
 
 \begin{figure*}[t]
   \centering
-  \subfloat[raw semantic points]{\includegraphics[width=0.18\textwidth]{BEV點雲原始圖.png}\label{fig:bev-raw}}
+  \subfloat[raw BEV points]{\includegraphics[width=0.29\textwidth]{BEV點雲原始圖_v1_cropped.png}\label{fig:bev-raw}}
   \hfill
-  \subfloat[aggregated point-only BEV]{\includegraphics[width=0.30\textwidth]{bev_without3D.jpg}\label{fig:bev-without3d}}
+  \subfloat[aggregated point-only BEV]{\includegraphics[width=0.29\textwidth]{bev_without3D.jpg}\label{fig:bev-without3d}}
   \hfill
-  \subfloat[hybrid BEV with tracker boxes]{\includegraphics[width=0.30\textwidth]{bev_with3D.jpg}\label{fig:bev-with3d}}
+  \subfloat[hybrid BEV with tracker boxes]{\includegraphics[width=0.29\textwidth]{bev_with3D.jpg}\label{fig:bev-with3d}}
   \caption{Representative BEV progression generated from the same scene. (a) shows the raw projected semantic points before temporal aggregation, (b) shows the point-only BEV after cross-frame semantic-point aggregation and rasterization, and (c) additionally overlays dynamic-agent footprints from 3D tracker outputs rather than raw detector outputs or ground-truth annotations.}
   \label{fig:bev-hybrid-vs-points}
 \end{figure*}
@@ -330,7 +357,7 @@ The GT-pose upper bound of 72.27\% demonstrates that adaptive multi-frame stacki
 This extension is intentionally focused: we do not claim to solve all aspects of 3D perception, but rather to improve the quality of the projected pseudo-labels and semantic BEV maps produced by a projection-based pipeline. The current results indicate that front-end semantic quality is an important bottleneck in projected semantic labeling, while the Taiwan BEV examples provide qualitative evidence that cleaner image-space masks can lead to cleaner downstream maps. At the same time, the system remains an offline pipeline because large-scale multimodal reasoning is still computationally expensive. Future work will study lighter prompt-refinement strategies, better handling of currently non-projected LiDAR points, and more comprehensive BEV-level metrics.
 
 \section{Conclusion}
-We presented an extension of a prior auto-labeling pipeline for projected semantic labeling and BEV map generation. The key change is a stronger semantic front-end that improves image-space masks before camera-to-LiDAR projection. Under the shared super-class projected-label protocol used in this paper, the improved front-end and projection pipeline outperform SAL on nuScenes, and the Taiwan examples qualitatively show cleaner BEV visualizations. These results support the value of improving image-space semantics before projection while leaving a more complete occupancy-level evaluation to future work.
+We presented an extension of a prior auto-labeling pipeline for projected semantic labeling and BEV map generation. The key change is a stronger semantic front-end that improves image-space masks before camera-to-LiDAR projection. Under the shared super-class projected-label protocol used in this paper, the improved front-end and projection pipeline outperform SAL on nuScenes, the resulting 3D occupancy labels reach 72.27\% mIoU with GT poses and 58.20\% with KISS-SLAM, and the Taiwan examples qualitatively show cleaner BEV visualizations. These results support the value of improving image-space semantics before projection while leaving broader occupancy-level evaluation under more challenging localization settings to future work.
 
 \sloppy
 \setlength{\emergencystretch}{1em}
