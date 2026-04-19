@@ -174,7 +174,7 @@ A $3 \times 3$ morphological dilation is applied to the road mask to close small
 
 \subsection{3D Semantic Occupancy Label Generation}
 \label{sec:occ}
-Beyond the 2D BEV map, the accumulated semantic point cloud is also rasterized into a dense 3D occupancy grid compatible with the Occ3D benchmark format~\cite{occ3d}. The grid is defined in the ego-vehicle frame with voxel resolution $r_{\mathrm{occ}} = 0.4$\,m, spanning $[-40, 40] \times [-40, 40] \times [-1, 5.4]$\,m along the ego $X$, $Y$, and $Z$ axes, yielding a $200 \times 200 \times 16$ dense voxel volume.
+Beyond the 2D BEV map, the accumulated semantic point cloud is also rasterized into a dense 3D occupancy grid. The grid is defined in the ego-vehicle frame with voxel resolution $r_{\mathrm{occ}} = 0.4$\,m, spanning $[-40, 40] \times [-40, 40] \times [-1, 5.4]$\,m along the ego $X$, $Y$, and $Z$ axes, yielding a $200 \times 200 \times 16$ dense voxel volume.
 
 \textbf{Label mapping.} The 32 nuScenes \texttt{lidarseg} classes are remapped to the 17 Occ3D semantic categories: ten dynamic classes (car, truck, bus, motorcycle, bicycle, pedestrian, traffic cone, barrier, construction vehicle, trailer) and six static classes (driveable surface, sidewalk, other flat, terrain, manmade, vegetation), plus an \emph{others} class for remaining foreground. Voxels that receive no point projection are assigned label~17 (\emph{free}).
 
@@ -294,10 +294,10 @@ In Taiwan mixed-traffic scenes, this progression is particularly visible in narr
 We also compare the front-end with and without GPT-4o-based refinement. The trigger thresholds $[\tau_c^{\mathrm{low}}, \tau_c^{\mathrm{high}}]$ and $\gamma_c$ are fixed per class on a held-out development split that is disjoint from the evaluation data, and each triggered image receives at most one additional GPT-4o-guided refinement round before re-running SAM~3. Using only the initial prompt set yields more fragmented static masks in distant regions. With the closed-loop refinement enabled, the mean fragmentation score over the triggered static-mask subset is reduced by 10.02\% relative, indicating that the quality-control trigger is useful before projection. This ablation further supports our decision to focus the extension on the semantic front-end rather than only on downstream point-cloud post-processing.
 
 \subsection{3D Occupancy Label Evaluation}
-Table~\ref{tab:occupancy} reports the mIoU of the generated 3D occupancy labels against the Occ3D ground truth on the nuScenes validation split (17 semantic classes, \texttt{mask\_lidar} evaluation protocol). We compare three pipeline configurations: (i)~a 10-sweep baseline with ground-truth (GT) ego poses, (ii)~a 40-sweep configuration with GT poses as an algorithmic upper bound, and (iii)~a 40-sweep configuration using estimated KISS-SLAM poses, representing the practical deployment setting without access to GT localization.
+Table~\ref{tab:occupancy} reports the mIoU of the generated 3D occupancy labels against the nuScenes ground truth on the validation split (17 semantic classes, \texttt{mask\_lidar} evaluation protocol). We compare three pipeline configurations: (i)~a 10-sweep baseline with ground-truth (GT) ego poses, (ii)~a 40-sweep configuration with GT poses as an algorithmic upper bound, and (iii)~a 40-sweep configuration using estimated KISS-SLAM poses, representing the practical deployment setting without access to GT localization.
 
 \begin{table}[t]
-  \caption{3D occupancy label quality on the nuScenes validation split (Occ3D protocol, 17 semantic classes, \texttt{mask\_lidar} evaluation).}
+  \caption{3D occupancy label quality on the nuScenes validation split (17 semantic classes, \texttt{mask\_lidar} evaluation).}
   \label{tab:occupancy}
   \centering
   \begin{tabular}{llcc}
@@ -361,9 +361,6 @@ A. Kirillov \emph{et al.}, ``Segment Anything,'' \emph{arXiv:2304.02643}, 2023.
 
 \bibitem{tbd_sam2video}
 N. Ravi \emph{et al.}, ``SAM 2: Segment Anything in Images and Videos,'' 2024.
-
-\bibitem{occ3d}
-X. Tian, T. Jiang, L. Yun, Y. Wang, Y. Wang, and H. Zhao, ``Occ3D: A Large-Scale 3D Occupancy Prediction Benchmark for Autonomous Driving,'' in \emph{Adv. Neural Inf. Process. Syst. (NeurIPS)}, 2023.
 
 \bibitem{qi_offboard3d}
 C. R. Qi, Y. Zhou, M. Najibi, P. Sun, K. Vo, B. Deng, and D. Anguelov, ``Offboard 3D Object Detection from Point Cloud Sequences,'' \emph{arXiv:2103.05073}, 2021.
