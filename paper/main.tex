@@ -174,7 +174,7 @@ A $3 \times 3$ morphological dilation is applied to the road mask to close small
 
 \subsection{3D Semantic Occupancy Label Generation}
 \label{sec:occ}
-Beyond the 2D BEV map, the accumulated semantic point cloud is also rasterized into a dense 3D occupancy grid. The grid is defined in the ego-vehicle frame with voxel resolution $r_{\mathrm{occ}} = 0.4$\,m, spanning $[-40, 40] \times [-40, 40] \times [-1, 5.4]$\,m along the ego $X$, $Y$, and $Z$ axes, yielding a $200 \times 200 \times 16$ dense voxel volume.
+In parallel with BEV map generation, we also produce a dense 3D occupancy grid directly from the accumulated multi-frame LiDAR point cloud and its semantic labels. The grid is defined in the ego-vehicle frame with voxel resolution $r_{\mathrm{occ}} = 0.4$\,m, spanning $[-40, 40] \times [-40, 40] \times [-1, 5.4]$\,m along the ego $X$, $Y$, and $Z$ axes, yielding a $200 \times 200 \times 16$ dense voxel volume.
 
 \textbf{Label mapping.} The 32 nuScenes \texttt{lidarseg} classes are remapped to the 17 Occ3D semantic categories: ten dynamic classes (car, truck, bus, motorcycle, bicycle, pedestrian, traffic cone, barrier, construction vehicle, trailer) and six static classes (driveable surface, sidewalk, other flat, terrain, manmade, vegetation), plus an \emph{others} class for remaining foreground. Voxels that receive no point projection are assigned label~17 (\emph{free}).
 
