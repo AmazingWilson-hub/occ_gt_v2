@@ -149,7 +149,8 @@ When multiple calibrated cameras are available, projection is carried out indepe
 
 To increase density before rasterization, we fuse multiple consecutive LiDAR sweeps into a common reference frame using ego-motion compensation. The result is a denser semantic point cloud with fewer holes than a single-sweep projection.
 
-\subsection{BEV Map Generation and Optional Occupancy Rasterization}
+\subsection{BEV Map Generation}
+\label{sec:bev}
 The BEV map is produced as a downstream representation of our projected semantic point cloud. It is intended primarily for qualitative inspection and application-facing visualization rather than as the main evaluation target of this work. For each frame, we reconstruct an ego-centric semantic point cloud by aggregating road-class points across frames using a hybrid odometry module with FPFH+ICP registration and IMU-assisted initialization, falling back to IMU-only integration when the ICP fitness score drops below 0.3. The aggregated road map is then inverse-transformed into the current ego frame, cropped to a 100~m radius, and merged with the current-frame projected semantic point cloud. Dynamic-object categories are excluded from the aggregated cloud to reduce motion-induced ghosting; their footprints are rendered separately from the 3D tracker outputs described below.
 
 We then project the semantic point cloud orthographically onto a 2D grid spanning $[-50,50] \times [-50,50]$~m around the ego vehicle with resolution $r = 0.5$~m/pixel, yielding a $200 \times 200$ BEV image. For each class $c$, we first count the supporting points in each cell:
@@ -169,7 +170,19 @@ If $|\mathcal{A}(u,v)| = 1$, that class is assigned directly. Otherwise, we use 
   L_{\mathrm{BEV}}(u,v) =
   \operatorname*{arg\,min}_{c \in \mathcal{A}(u,v)} z_{\min,c}(u,v).
 \end{equation}
-A $3 \times 3$ morphological dilation is applied to the road mask to close small gaps caused by sparse returns. \emph{Potential Obstacle} regions are preserved as a distinct visualization class during rasterization and are not overwritten by the dilated road mask. The same raster can also be converted into a simplified occupancy map by thresholding the number of points in each cell. However, this paper does not evaluate occupancy-specific metrics, so the quantitative analysis focuses on the semantic BEV map and projected semantic point cloud. For the hybrid BEV visualizations, oriented rectangles from our 3D object tracker are rasterized onto the semantic map using each track's position, heading, and first-frame-anchored 3D box dimensions. These overlays correspond to tracker outputs rather than raw detector outputs or ground-truth annotations.
+A $3 \times 3$ morphological dilation is applied to the road mask to close small gaps caused by sparse returns. \emph{Potential Obstacle} regions are preserved as a distinct visualization class during rasterization and are not overwritten by the dilated road mask. For the hybrid BEV visualizations, oriented rectangles from our 3D object tracker are rasterized onto the semantic map using each track's position, heading, and first-frame-anchored 3D box dimensions. These overlays correspond to tracker outputs rather than raw detector outputs or ground-truth annotations.
+
+\subsection{3D Semantic Occupancy Label Generation}
+\label{sec:occ}
+Beyond the 2D BEV map, the accumulated semantic point cloud is also rasterized into a dense 3D occupancy grid compatible with the Occ3D benchmark format~\cite{occ3d}. The grid is defined in the ego-vehicle frame with voxel resolution $r_{\mathrm{occ}} = 0.4$\,m, spanning $[-40, 40] \times [-40, 40] \times [-1, 5.4]$\,m along the ego $X$, $Y$, and $Z$ axes, yielding a $200 \times 200 \times 16$ dense voxel volume.
+
+\textbf{Label mapping.} The 32 nuScenes \texttt{lidarseg} classes are remapped to the 17 Occ3D semantic categories: ten dynamic classes (car, truck, bus, motorcycle, bicycle, pedestrian, traffic cone, barrier, construction vehicle, trailer) and six static classes (driveable surface, sidewalk, other flat, terrain, manmade, vegetation), plus an \emph{others} class for remaining foreground. Voxels that receive no point projection are assigned label~17 (\emph{free}).
+
+\textbf{Adaptive multi-frame accumulation.} Spatial coverage is improved by stacking $\pm N$ surrounding LiDAR sweeps with the same ego-motion compensation used for BEV aggregation (Section~\ref{sec:bev}). To balance completeness against motion-induced ghosting, a longer accumulation window ($N = 20$) is used for static categories such as driveable surface and vegetation, while a shorter window ($N = 5$) is applied to dynamic categories.
+
+\textbf{Dynamic object volume filling.} For each 3D bounding box in the current frame, voxel centers that lie inside the box are identified using an axis-aligned bounding box test followed by a per-voxel point-in-box check in box-local coordinates. Empty voxels (label~17) within the box are then assigned the corresponding semantic class. This step converts hollow LiDAR surface shells into solid object volumes, improving coverage on the interior of large vehicles.
+
+The resulting $200 \times 200 \times 16$ occupancy tensor is evaluated against the official Occ3D ground truth using the \texttt{mask\_lidar} field to restrict comparison to LiDAR-visible voxels, following the standard Occ3D evaluation protocol.
 
 \section{Experiments}
 \subsection{Datasets and Implementation Details}
@@ -280,6 +293,26 @@ In Taiwan mixed-traffic scenes, this progression is particularly visible in narr
 \subsection{Ablation on the Segmentation Front-End}
 We also compare the front-end with and without GPT-4o-based refinement. The trigger thresholds $[\tau_c^{\mathrm{low}}, \tau_c^{\mathrm{high}}]$ and $\gamma_c$ are fixed per class on a held-out development split that is disjoint from the evaluation data, and each triggered image receives at most one additional GPT-4o-guided refinement round before re-running SAM~3. Using only the initial prompt set yields more fragmented static masks in distant regions. With the closed-loop refinement enabled, the mean fragmentation score over the triggered static-mask subset is reduced by 10.02\% relative, indicating that the quality-control trigger is useful before projection. This ablation further supports our decision to focus the extension on the semantic front-end rather than only on downstream point-cloud post-processing.
 
+\subsection{3D Occupancy Label Evaluation}
+Table~\ref{tab:occupancy} reports the mIoU of the generated 3D occupancy labels against the Occ3D ground truth on the nuScenes validation split (17 semantic classes, \texttt{mask\_lidar} evaluation protocol). We compare three pipeline configurations: (i)~a 10-sweep baseline with ground-truth (GT) ego poses, (ii)~a 40-sweep configuration with GT poses as an algorithmic upper bound, and (iii)~a 40-sweep configuration using estimated KISS-SLAM poses, representing the practical deployment setting without access to GT localization.
+
+\begin{table}[t]
+  \caption{3D occupancy label quality on the nuScenes validation split (Occ3D protocol, 17 semantic classes, \texttt{mask\_lidar} evaluation).}
+  \label{tab:occupancy}
+  \centering
+  \begin{tabular}{llcc}
+    \toprule
+    Configuration & Pose Backend & Sweeps & mIoU (\%) \\
+    \midrule
+    Baseline & GT pose      & 10 & 48.82 \\
+    Ours     & GT pose      & 40 & 72.27 \\
+    Ours     & KISS-SLAM    & 40 & 58.20 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The GT-pose upper bound of 72.27\% demonstrates that adaptive multi-frame stacking and dynamic box volume filling can produce high-quality occupancy labels when accurate ego poses are available. In the practical KISS-SLAM setting, mIoU decreases to 58.20\%, indicating that pose drift is the primary remaining source of error. The gap between the 10-sweep baseline (48.82\%) and the 40-sweep variant (72.27\% with GT pose) confirms that longer temporal accumulation substantially improves coverage and label completeness in the 3D occupancy representation.
+
 \section{Discussion}
 This extension is intentionally focused: we do not claim to solve all aspects of 3D perception, but rather to improve the quality of the projected pseudo-labels and semantic BEV maps produced by a projection-based pipeline. The current results indicate that front-end semantic quality is an important bottleneck in projected semantic labeling, while the Taiwan BEV examples provide qualitative evidence that cleaner image-space masks can lead to cleaner downstream maps. At the same time, the system remains an offline pipeline because large-scale multimodal reasoning is still computationally expensive. Future work will study lighter prompt-refinement strategies, better handling of currently non-projected LiDAR points, and more comprehensive BEV-level metrics.
 
@@ -328,6 +361,9 @@ A. Kirillov \emph{et al.}, ``Segment Anything,'' \emph{arXiv:2304.02643}, 2023.
 
 \bibitem{tbd_sam2video}
 N. Ravi \emph{et al.}, ``SAM 2: Segment Anything in Images and Videos,'' 2024.
+
+\bibitem{occ3d}
+X. Tian, T. Jiang, L. Yun, Y. Wang, Y. Wang, and H. Zhao, ``Occ3D: A Large-Scale 3D Occupancy Prediction Benchmark for Autonomous Driving,'' in \emph{Adv. Neural Inf. Process. Syst. (NeurIPS)}, 2023.
 
 \bibitem{qi_offboard3d}
 C. R. Qi, Y. Zhou, M. Najibi, P. Sun, K. Vo, B. Deng, and D. Anguelov, ``Offboard 3D Object Detection from Point Cloud Sequences,'' \emph{arXiv:2103.05073}, 2021.
