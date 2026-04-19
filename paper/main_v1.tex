@@ -1,0 +1,382 @@
+% !TEX program = pdflatex
+\documentclass[conference]{IEEEtran}
+
+\usepackage{amsmath,amssymb}
+\usepackage{newtxtext}
+\usepackage{newtxmath}
+\usepackage{graphicx}
+\usepackage[caption=false,font=footnotesize]{subfig}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\raggedbottom
+
+\title{Extending Auto-Labeling for Projected Semantic Labeling and BEV Map Generation via Multi-View Semantic Projection}
+
+\author{Anonymous Authors}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This paper presents an extension to a prior auto-labeling pipeline for projected semantic labeling and Bird's-Eye-View (BEV) map generation. The proposed method replaces the original front-end semantic labeling module with a stronger multi-view segmentation and projection framework that combines YOLOv7, SAM~3, and a GPT-4o-guided prompt-refinement loop to improve image-space semantics for both dynamic agents and static scene elements. The refined semantics are projected into LiDAR space through explicit camera--LiDAR calibration, fused across views and frames, and rasterized into semantic BEV maps. Segment Anything in LiDAR (SAL) is adopted as the primary baseline because it follows a comparable 2D-to-3D auto-labeling paradigm. Under the shared super-class projected-label protocol used in this study, the proposed method improves mIoU on the nuScenes validation split from 52.6\% to 58.7\%. Qualitative results on Taiwan traffic scenes further show cleaner and more coherent BEV visualizations. These findings indicate that improving the 2D semantic front-end, together with calibration-based projection and multi-view fusion, can substantially enhance downstream 3D pseudo-label quality in projection-based BEV pipelines. The same accumulated semantic point cloud is also rasterized into a $200\times200\times16$ 3D occupancy grid; with ground-truth ego poses, the pipeline achieves 72.27\% mIoU on nuScenes, and with KISS-SLAM estimated poses it achieves 58.20\%, demonstrating practical occupancy label generation without ground-truth localization.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Auto-labeling, BEV map generation, semantic projection, point cloud labeling, autonomous driving
+\end{IEEEkeywords}
+
+\section{Introduction}
+Reliable BEV and occupancy representations are fundamental for autonomous driving because they provide a compact spatial interface for perception, planning, and safety reasoning. However, building these representations at scale still depends on large volumes of accurately labeled 3D data. Manual annotation of LiDAR scenes is costly and slow, especially in complex urban environments where sparsity, occlusion, and sensor noise make point-level labeling difficult.
+
+Auto-labeling has therefore become an attractive alternative. The core idea is to obtain strong semantic cues in the image domain and transfer them to 3D through camera--LiDAR calibration. This strategy is particularly valuable for generating semantic point clouds, occupancy grids, and BEV maps without fully manual 3D annotation. Nevertheless, the quality of the final BEV output still depends heavily on the quality of the upstream 2D semantic masks. In practice, errors such as missed distant objects, merged scooters, fragmented roadside structures, and unstable boundaries are often propagated into the projected point cloud and later into the BEV raster.
+
+This issue becomes more severe under domain shift. Public datasets such as nuScenes~\cite{nuscenes}, Zenseact Open Dataset~\cite{tbd_zod}, and SemanticKITTI~\cite{tbd_semantickitti} are important benchmarks, but they do not fully capture the traffic patterns of Taiwan, where dense scooters, narrow alleys, and heavy roadside signage frequently produce small, distant, and partially occluded instances. Furthermore, real-world deployment datasets often lack ground-truth ego poses, making multi-frame point cloud accumulation---a key step for dense occupancy label generation---dependent on estimated ego localization. Figure~\ref{fig:taiwan-vs-public} illustrates the type of mixed-traffic scene that motivates this work.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{fig1_台灣道路示意圖.jpg}
+  \caption{Taiwan traffic scene characteristics that challenge projection-based auto-labeling, including dense scooters, narrow alleys, and complex signage.}
+  \label{fig:taiwan-vs-public}
+\end{figure}
+
+In this paper, we extend the previous auto-labeling-to-BEV pipeline by replacing the original 2D semantic front-end with a stronger segmentation and semantic-verification module. Rather than treating point-cloud projection as a purely geometric lifting problem, we first improve the image-space semantics and then project the refined masks to LiDAR for BEV generation. We use SAL~\cite{sal} as the main baseline because it is likewise a projection-based 3D auto-labeling pipeline. To ensure a fair downstream comparison, both SAL and our method are evaluated under the same projected-label protocol and with the same BEV map-generation backend.
+
+The main contributions of this extension are as follows:
+\begin{itemize}
+  \item We upgrade the 2D semantic module in an existing auto-labeling pipeline for projected semantic labeling and BEV map generation with a stronger front-end built from YOLOv7, SAM~3, and GPT-4o-guided prompt refinement.
+  \item We introduce a calibration-based multi-view projection and fallback mechanism that fuses refined image semantics into a semantic LiDAR representation while preserving non-projected points as an auxiliary \emph{Potential Obstacle} label.
+  \item Under a shared projected-label protocol, we show that the proposed front-end and projection pipeline improve projected semantic point-cloud quality over SAL and produce qualitatively cleaner BEV visualizations.
+  \item We extend the pipeline to generate dense 3D semantic occupancy labels via adaptive multi-frame LiDAR accumulation, dynamic object volume filling, and a pose estimation module that supports datasets without ground-truth localization, achieving 72.27\% mIoU with GT poses and 58.20\% with KISS-SLAM on nuScenes.
+\end{itemize}
+
+\section{Related Work}
+\subsection{Auto-Labeling for 3D Perception}
+Large-scale 3D annotation has motivated a wide range of auto-labeling pipelines. Early systems relied on temporal fusion and offboard processing to densify point clouds and refine detection targets from future frames~\cite{qi_offboard3d}. More recent methods use promptable segmentation models to transfer 2D semantics into 3D. Among them, SAL~\cite{sal} is a strong reference point because it explicitly projects image masks to LiDAR and then performs geometric refinement. Our work follows the same high-level paradigm but focuses on improving the semantic quality \emph{before} projection so that the downstream BEV map inherits fewer errors.
+
+\subsection{Foundation Models for Semantic Segmentation}
+Promptable and open-vocabulary models have changed the design space of semantic perception. Grounding DINO~\cite{tbd_groundingdino} enables text-conditioned localization, while SAM~\cite{tbd_sam} and SAM~2~\cite{tbd_sam2video} provide strong promptable segmentation. More recent multimodal models such as BLIP-2~\cite{blip2} and GPT-4o~\cite{gpt4o_systemcard} offer richer semantic reasoning capabilities that can be used to repair under-specified prompts or identify missed objects. Our extension leverages this capability to improve the masks used for 3D projection.
+
+\subsection{Projection-Based BEV Map Generation}
+Projection-based BEV mapping lifts semantic information from camera space into LiDAR space and then rasterizes the semantic point cloud into a top-down map. The quality of this pipeline depends on both calibration accuracy and the completeness of the 2D semantic masks. When the masks are fragmented or semantically ambiguous, the BEV map becomes sparse and inconsistent. This observation motivates our design choice: improve the semantic masks first, then use the projected labels for BEV generation.
+
+\section{Methodology}
+\subsection{System Overview}
+Figure~\ref{fig:system-overview} summarizes the extended pipeline. The framework contains three stages: (1) image-space semantic segmentation and refinement, (2) camera-to-LiDAR semantic projection and fusion, and (3) downstream semantic BEV map generation and 3D occupancy label generation from the resulting semantic point cloud.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{系統流程圖.png}
+  \caption{Overview of the extended auto-labeling pipeline. A stronger image-space semantic front-end is followed by calibration-based projection and BEV map generation.}
+  \label{fig:system-overview}
+\end{figure}
+
+\subsection{Semantic Segmentation Front-End}
+The first stage replaces the original front-end with a stronger semantic segmentation module, shown in Figure~\ref{fig:2d-pipeline}. We separate the processing of dynamic agents and static scene elements so that each branch can use the most suitable prompt type.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{語意分割流程圖.png}
+  \caption{Semantic segmentation front-end used in the extended pipeline. Dynamic objects are prompted by detections, while static semantics are refined through a reasoning loop.}
+  \label{fig:2d-pipeline}
+\end{figure}
+
+\textbf{Dynamic objects.} For vehicles, pedestrians, riders, and other dynamic agents, we first use YOLOv7~\cite{yolov7} to generate image-space bounding boxes. These boxes act as visual prompts for SAM~3~\cite{sam3}, yielding instance masks that preserve object boundaries better than detector boxes alone.
+
+\textbf{Static scene elements.} For road, sidewalk, building, vegetation, barrier, and other background categories, we use promptable segmentation with a predefined semantic vocabulary. Because static classes are especially vulnerable to long-range misses and fragmented boundaries, we add a closed-loop quality check before projection.
+
+For a class-specific mask $M_c$ on an image of height $H$ and width $W$, we define the coverage ratio as
+\begin{equation}
+  C_r(c) = \frac{\operatorname{Area}(M_c)}{H \cdot W},
+\end{equation}
+where the acceptable interval $[\tau_c^{\mathrm{low}}, \tau_c^{\mathrm{high}}]$ is tuned per class on a held-out development split that is disjoint from the evaluation split. We also define the fragmentation score as
+\begin{equation}
+  F_s(c) = \frac{N_{\mathrm{contours}}(M_c)}{\max(\operatorname{Area}(M_c), \epsilon)},
+\end{equation}
+where $\epsilon$ avoids numerical instability for small masks and $\gamma_c$ is likewise tuned per class on the same held-out split. If either $C_r(c)$ falls outside its valid interval or $F_s(c)$ exceeds $\gamma_c$, the image is sent to GPT-4o~\cite{gpt4o_systemcard} for prompt refinement. GPT-4o returns more specific prompts, such as \emph{distant signboard}, \emph{traffic island}, or \emph{concrete barrier}, which are then fed back to SAM~3 for one additional refinement round before the final projection pass.
+
+Figure~\ref{fig:gai-before-after} shows a qualitative example. The refined prompts improve the completeness of long-range static structures and help recover semantically meaningful regions that would otherwise be lost before 3D projection.
+
+\begin{figure}[t]
+  \centering
+  \subfloat[initial segmentation]{\includegraphics[width=0.49\linewidth]{語意分割_withoutGAI.png}\label{fig:gai-without}}
+  \hfill
+  \subfloat[refined segmentation]{\includegraphics[width=0.49\linewidth]{語意分割withGAI.png}\label{fig:gai-with}}
+  \caption{Qualitative comparison of the segmentation front-end before and after GPT-4o-based prompt refinement.}
+  \label{fig:gai-before-after}
+\end{figure}
+
+\subsection{Calibration-Based 2D-to-3D Projection}
+After 2D semantics are finalized, we lift them to LiDAR space using explicit extrinsic and intrinsic calibration. Figure~\ref{fig:projection-geometry} illustrates the camera-to-LiDAR projection stage used in the proposed pipeline. Specifically, the figure shows three consecutive steps: (a) transforming LiDAR points into the camera frame, (b) projecting them through the pinhole camera model with distortion correction, and (c) propagating pixel semantics back to the semantic point-cloud representation.
+
+Let the homogeneous LiDAR point be
+\begin{equation}
+  \tilde{P}_{\mathrm{lidar}} = [x_l,\, y_l,\, z_l,\, 1]^T.
+\end{equation}
+We then map this point into the camera frame with the camera-from-LiDAR transformation matrix $\mathbf{T}_{\mathrm{cam}\leftarrow\mathrm{lidar}} \in \mathbb{R}^{4\times 4}$:
+\begin{equation}
+  \tilde{P}_{\mathrm{cam}} = \mathbf{T}_{\mathrm{cam}\leftarrow\mathrm{lidar}}\,\tilde{P}_{\mathrm{lidar}}.
+\end{equation}
+If $\tilde{P}_{\mathrm{cam}} = [x_c, y_c, z_c, 1]^T$ with $z_c > 0$, the normalized image coordinates are
+\begin{equation}
+  x_n = \frac{x_c}{z_c}, \qquad y_n = \frac{y_c}{z_c}.
+\end{equation}
+We then undistort the normalized image coordinates and project the point onto the pixel plane through the camera intrinsic matrix $\mathbf{K}$:
+\begin{equation}
+  \begin{bmatrix} u \\ v \\ 1 \end{bmatrix}
+  \sim
+  \mathbf{K}
+  \begin{bmatrix} x_u \\ y_u \\ 1 \end{bmatrix},
+\end{equation}
+where $(x_u, y_u)$ are the undistorted normalized coordinates.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{點雲投影示意圖_v1.png}
+  \caption{Camera-to-LiDAR projection stage in the proposed pipeline. LiDAR points are transformed into the camera frame, projected through the pinhole camera model with distortion correction, and converted into semantic point-cloud labels.}
+  \label{fig:projection-geometry}
+\end{figure}
+
+For every valid projection, the pixel label is assigned to the corresponding LiDAR point. We use \emph{Potential Obstacle} as an auxiliary fallback label for LiDAR points that do not receive a valid semantic projection, for example because they fall outside the image field of view, are not covered by the projected semantic mask, or remain unlabeled after projection. These points are retained as a safety-preserving layer in the projected point cloud and visualized as yellow points in downstream BEV generation rather than discarded.
+
+When multiple calibrated cameras are available, projection is carried out independently for each view, and the resulting semantic labels are fused in the LiDAR frame. Figure~\ref{fig:six-view-projection} illustrates the surround-view semantic-fusion stage used in the proposed pipeline. The same formulation also applies to single-view systems by using only the available camera stream.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.92\textwidth]{六視角點雲投影.png}
+  \caption{Surround-view semantic fusion stage in the proposed pipeline. Semantic cues from multiple calibrated cameras are projected into a common LiDAR frame and fused before BEV rasterization.}
+  \label{fig:six-view-projection}
+\end{figure*}
+
+To increase density before rasterization, we fuse multiple consecutive LiDAR sweeps into a common reference frame using ego-motion compensation. The result is a denser semantic point cloud with fewer holes than a single-sweep projection.
+
+\subsection{BEV Map Generation}
+\label{sec:bev}
+The BEV map is produced as a downstream representation of our projected semantic point cloud. It is intended primarily for qualitative inspection and application-facing visualization rather than as the main evaluation target of this work. For each frame, we reconstruct an ego-centric semantic point cloud by aggregating road-class points across frames using a hybrid odometry module with FPFH+ICP registration and IMU-assisted initialization, falling back to IMU-only integration when the ICP fitness score drops below 0.3. The aggregated road map is then inverse-transformed into the current ego frame, cropped to a 100~m radius, and merged with the current-frame projected semantic point cloud. Dynamic-object categories are excluded from the aggregated cloud to reduce motion-induced ghosting; their footprints are rendered separately from the 3D tracker outputs described below.
+
+We then project the semantic point cloud orthographically onto a 2D grid spanning $[-50,50] \times [-50,50]$~m around the ego vehicle with resolution $r = 0.5$~m/pixel, yielding a $200 \times 200$ BEV image. For each class $c$, we first count the supporting points in each cell:
+\begin{equation}
+  n_c(u,v) = \sum_{p_i \in \mathcal{C}(u,v)} \mathbb{1}[\ell_i = c].
+\end{equation}
+We then form the majority-vote candidate set
+\begin{equation}
+  \mathcal{A}(u,v) = \left\{ c \mid n_c(u,v) = \max_{c'} n_{c'}(u,v) \right\}.
+\end{equation}
+If $|\mathcal{A}(u,v)| = 1$, that class is assigned directly. Otherwise, we use the lowest-height supporting point as a tie-breaker so that drivable surfaces are preferred:
+\begin{equation}
+  z_{\min,c}(u,v) = \min_{\substack{p_i \in \mathcal{C}(u,v) \\
+  \ell_i = c}} z_i,
+\end{equation}
+\begin{equation}
+  L_{\mathrm{BEV}}(u,v) =
+  \operatorname*{arg\,min}_{c \in \mathcal{A}(u,v)} z_{\min,c}(u,v).
+\end{equation}
+A $3 \times 3$ morphological dilation is applied to the road mask to close small gaps caused by sparse returns. \emph{Potential Obstacle} regions are preserved as a distinct visualization class during rasterization and are not overwritten by the dilated road mask. For the hybrid BEV visualizations, oriented rectangles from our 3D object tracker are rasterized onto the semantic map using each track's position, heading, and first-frame-anchored 3D box dimensions. These overlays correspond to tracker outputs rather than raw detector outputs or ground-truth annotations.
+
+\subsection{3D Semantic Occupancy Label Generation}
+\label{sec:occ}
+In parallel with BEV map generation, we also produce a dense 3D occupancy grid directly from the accumulated multi-frame LiDAR point cloud and its semantic labels. The grid is defined in the ego-vehicle frame with voxel resolution $r_{\mathrm{occ}} = 0.4$\,m, spanning $[-40, 40] \times [-40, 40] \times [-1, 5.4]$\,m along the ego $X$, $Y$, and $Z$ axes, yielding a $200 \times 200 \times 16$ dense voxel volume. Each LiDAR point $\mathbf{p} = (x, y, z)$ is mapped to a voxel index $(i, j, k)$ by
+\begin{equation}
+  i = \left\lfloor \frac{x - x_{\min}}{r_{\mathrm{occ}}} \right\rfloor, \quad
+  j = \left\lfloor \frac{y - y_{\min}}{r_{\mathrm{occ}}} \right\rfloor, \quad
+  k = \left\lfloor \frac{z - z_{\min}}{r_{\mathrm{occ}}} \right\rfloor,
+\end{equation}
+where $(x_{\min}, y_{\min}, z_{\min}) = (-40, -40, -1)$\,m are the grid lower bounds. Points that fall outside the grid range are discarded.
+
+\textbf{Label mapping.} The 32 nuScenes \texttt{lidarseg} classes are remapped to the 17 Occ3D semantic categories: ten dynamic classes (car, truck, bus, motorcycle, bicycle, pedestrian, traffic cone, barrier, construction vehicle, trailer) and six static classes (driveable surface, sidewalk, other flat, terrain, manmade, vegetation), plus an \emph{others} class for remaining foreground. Voxels that receive no point projection are assigned label~17 (\emph{free}).
+
+\textbf{Adaptive multi-frame accumulation.} Spatial coverage is improved by stacking $\pm N$ surrounding LiDAR sweeps, but static and dynamic points require fundamentally different accumulation strategies.
+
+For \emph{static points} (road, sidewalk, vegetation, manmade structures, etc.), we transform each historical sweep into the current ego frame using the full pose chain: LiDAR $\to$ ego $\to$ global $\to$ ego$_{\text{current}}$. This rigid transformation is valid because static elements do not move between frames, so accumulating them improves spatial density without introducing semantic inconsistency. A longer window ($N = 20$ sweeps) is used to maximize coverage of large ground and structure regions.
+
+For \emph{dynamic objects} (vehicles, pedestrians, etc.), ego-motion compensation alone is insufficient because the objects themselves move independently. Instead, we align each instance across frames using its 3D bounding box pose: points belonging to the same tracked instance in a past or future frame are first transformed into the box-local coordinate frame of that frame, then re-expressed in the box-local frame of the current frame, and finally projected back into the current ego frame. This box-based alignment ensures that accumulated dynamic points remain geometrically consistent with the object's current position and orientation. A shorter window ($N = 5$ sweeps) is used for dynamic categories to limit ghosting from rapidly moving objects.
+
+\textbf{Dynamic object volume filling.} For each 3D bounding box in the current frame, voxel centers that lie inside the box are identified using an axis-aligned bounding box test followed by a per-voxel point-in-box check in box-local coordinates. Empty voxels (label~17) within the box are then assigned the corresponding semantic class. This step converts hollow LiDAR surface shells into solid object volumes, improving coverage on the interior of large vehicles.
+
+\textbf{Ego pose estimation for datasets without ground-truth localization.} Multi-frame accumulation requires accurate ego poses to transform past and future sweeps into the current frame. On nuScenes this is straightforward because ground-truth ego poses are provided. However, the custom Taiwan dataset does not supply ground-truth localization, which is a common constraint in real-world deployment. To address this, we evaluate several pose estimation backends as drop-in replacements: (i)~\emph{IMU dead reckoning}, which integrates CAN-bus acceleration and orientation but accumulates drift rapidly; (ii)~\emph{LiDAR ICP}, which estimates relative poses by sequential point-to-plane ICP between consecutive scans; (iii)~\emph{GPS+IMU EKF fusion}, which corrects IMU drift using GPS absolute position via an Extended Kalman Filter; and (iv)~\emph{full fusion}, which combines ICP-derived relative poses with EKF-corrected GPS positions to achieve sub-metre translation error. On nuScenes, KISS-SLAM is used as a representative learned odometry backend to simulate the no-GT-pose condition. For the custom Taiwan dataset, which provides neither GT ego poses nor loop-closure constraints, we adopt KISS-SLAM combined with GPS position fusion as the practical pose backend, as this combination provides the best trade-off between drift suppression and deployment simplicity. The choice of pose backend directly affects occupancy label quality because drift causes misalignment between accumulated sweeps, producing ghost voxels in static regions and blurred object boundaries.
+
+The resulting $200 \times 200 \times 16$ occupancy tensor is evaluated against the nuScenes ground truth using the \texttt{mask\_lidar} field to restrict comparison to LiDAR-visible voxels.
+
+\section{Experiments}
+\subsection{Datasets and Implementation Details}
+We evaluate the proposed extension on two datasets.
+\begin{itemize}
+  \item \textbf{nuScenes validation split}~\cite{nuscenes}: This benchmark is used for the main quantitative comparison against SAL.
+  \item \textbf{Custom Taiwan traffic dataset}: This dataset contains 6587 synchronized frames collected in Taipei. It emphasizes mixed traffic, dense scooters, narrow alleys, and complex roadside structures that are not sufficiently represented in Western benchmarks.
+\end{itemize}
+
+\begin{table}[t]
+  \caption{Dataset statistics.}
+  \label{tab:dataset-frames}
+  \centering
+  \begin{tabular}{lc}
+    \toprule
+    Dataset & \#Frames \\
+    \midrule
+    nuScenes (val) & 6019 \\
+    Custom Taiwan & 6587 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The Taiwan platform uses a Velodyne VLS-128 LiDAR and calibrated RGB imagery. All experiments are implemented in PyTorch. The segmentation front-end uses YOLOv7, SAM~3, and GPT-4o. The projected labels from both SAL and our method are fed into the same BEV backend with identical grid resolution, fusion length, and rasterization rules to isolate the effect of the labeling front-end.
+
+\subsection{Baselines and Evaluation Protocol}
+We use SAL~\cite{sal} as the primary baseline because it is the closest published pipeline to our setting: both methods begin with image semantics, project them to LiDAR, and construct 3D pseudo labels from the projected point cloud. To compare the two systems fairly, we adopt the super-class evaluation setting used in the SAL comparison and merge fine-grained labels into a smaller set of BEV-relevant categories.
+
+As an additional reference point, we also report a comparison with 3D-AVS~\cite{three_d_avs}, a recent LiDAR-based 3D auto-vocabulary segmentation method. Because 3D-AVS targets open-vocabulary point-cloud segmentation rather than BEV-oriented projection and rasterization, we treat it as a supplementary benchmark rather than the primary baseline.
+
+\begin{table}[t]
+  \caption{Task-oriented super-class protocol used for the SAL comparison in this paper.}
+  \label{tab:label-protocol}
+  \centering
+  \footnotesize
+  \begin{tabular}{p{0.26\linewidth}p{0.60\linewidth}}
+    \toprule
+    Super-class & Representative labels \\
+    \midrule
+    Road & road, lane marking, drivable area \\
+    Flat & sidewalk, parking, terrain \\
+    Vehicle & car, bus, truck, trailer, scooter, bicycle \\
+    Human & pedestrian, rider \\
+    Structure & barrier, pole, traffic sign, building \\
+    Vegetation & vegetation, tree \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The \emph{Potential Obstacle} label is an internal fallback label used only for LiDAR points that do not obtain a valid semantic projection into one of the six shared super-classes in Table~\ref{tab:label-protocol}. Because neither the SAL comparison protocol nor the nuScenes ground-truth label space contains an equivalent evaluation category, \emph{Potential Obstacle} is excluded from the primary mIoU computation rather than matched to a semantic ground-truth class. We therefore compute the reported 52.6\% and 58.7\% mIoU values on the shared super-class label space only, while retaining \emph{Potential Obstacle} during BEV generation as a visualization-only safety layer instead of removing those points.
+
+\subsection{Projected Auto-Labeling Results}
+Table~\ref{tab:miou} reports the main comparison on nuScenes. Under the shared super-class projected-label protocol, our method improves mIoU from 52.6\% to 58.7\%. Because this comparison is computed on the shared super-class label space, the main table evaluates semantic agreement only on classes common to both methods.
+
+\begin{table}[t]
+  \caption{Comparison on nuScenes lidarSeg under the task-oriented super-class protocol.}
+  \label{tab:miou}
+  \centering
+  \begin{tabular}{lc}
+    \toprule
+    Method & mIoU (\%) \\
+    \midrule
+    SAL~\cite{sal} & 52.6 \\
+    Ours & 58.7 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Qualitatively, the largest gains are observed in situations where projection-based pipelines usually fail: distant structures with incomplete masks, dense scooter regions with overlapping silhouettes, and roadside objects that are visually small but important for BEV completeness.
+
+\subsection{Supplementary Comparison with 3D-AVS}
+To further position the proposed method against recent 3D segmentation approaches, we also report a supplementary comparison with 3D-AVS~\cite{three_d_avs}. For this experiment, we map our projected semantic point-cloud labels to the official 16-class nuScenes lidarSeg taxonomy following the 16-class evaluation setting used by 3D-AVS, and then compare the resulting semantic point cloud directly against the nuScenes ground-truth labels. Because this setting is different from the SAL-oriented super-class protocol in Table~\ref{tab:label-protocol}, we present it as a complementary benchmark rather than as the primary comparison.
+
+\begin{table}[t]
+  \caption{Supplementary comparison on the official nuScenes lidarSeg 16-class benchmark. The 3D-AVS results are reported from the supplementary material of~\cite{three_d_avs_supp}.}
+  \label{tab:three-d-avs}
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    Method & Setting & mIoU (\%) \\
+    \midrule
+    3D-AVS~\cite{three_d_avs} & Image & 34.6 \\
+    3D-AVS~\cite{three_d_avs} & LiDAR & 33.4 \\
+    3D-AVS~\cite{three_d_avs} & Image+LiDAR & 36.2 \\
+    Ours & Image+LiDAR & 39.4 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Under this 16-class setting, our method exceeds the image-only and LiDAR-only variants of 3D-AVS by 4.8 and 6.0 points, respectively, and also improves over the fused Image+LiDAR setting by 3.2 points. This supplementary result suggests that the improved 2D semantic front-end together with our point-cloud projection pipeline can produce a stronger final semantic point cloud against ground truth under the official nuScenes label space.
+
+\subsection{BEV Map Generation Results}
+The next question is how the downstream BEV evolves from raw projected semantic points to a temporally aggregated point-only map and finally to a hybrid BEV with tracker-box rendering. Figure~\ref{fig:bev-hybrid-vs-points} shows this three-stage progression. The raw point projection is sparse and incomplete, temporal aggregation improves the continuity of the static map, and hybrid rendering further sharpens dynamic footprints by drawing tracked 3D boxes instead of relying only on sparse semantic points.
+
+\begin{figure*}[t]
+  \centering
+  \subfloat[raw BEV points]{\includegraphics[width=0.29\textwidth]{BEV點雲原始圖_v1_cropped.png}\label{fig:bev-raw}}
+  \hfill
+  \subfloat[aggregated point-only BEV]{\includegraphics[width=0.29\textwidth]{bev_without3D.jpg}\label{fig:bev-without3d}}
+  \hfill
+  \subfloat[hybrid BEV with tracker boxes]{\includegraphics[width=0.29\textwidth]{bev_with3D.jpg}\label{fig:bev-with3d}}
+  \caption{Representative BEV progression generated from the same scene. (a) shows the raw projected semantic points before temporal aggregation, (b) shows the point-only BEV after cross-frame semantic-point aggregation and rasterization, and (c) additionally overlays dynamic-agent footprints from 3D tracker outputs rather than raw detector outputs or ground-truth annotations.}
+  \label{fig:bev-hybrid-vs-points}
+\end{figure*}
+
+In Taiwan mixed-traffic scenes, this progression is particularly visible in narrow roads and scooter-dense areas. From (a) to (b), temporal aggregation reduces sparsity and improves the continuity of the static map. From (b) to (c), tracker-based box rendering sharpens object footprints and improves the readability of the final BEV map. These figures are intended as qualitative demonstrations of downstream BEV coherence rather than as the primary quantitative evaluation target of the paper.
+
+\subsection{Ablation on the Segmentation Front-End}
+We also compare the front-end with and without GPT-4o-based refinement. The trigger thresholds $[\tau_c^{\mathrm{low}}, \tau_c^{\mathrm{high}}]$ and $\gamma_c$ are fixed per class on a held-out development split that is disjoint from the evaluation data, and each triggered image receives at most one additional GPT-4o-guided refinement round before re-running SAM~3. Using only the initial prompt set yields more fragmented static masks in distant regions. With the closed-loop refinement enabled, the mean fragmentation score over the triggered static-mask subset is reduced by 10.02\% relative, indicating that the quality-control trigger is useful before projection. This ablation further supports our decision to focus the extension on the semantic front-end rather than only on downstream point-cloud post-processing.
+
+\subsection{3D Occupancy Label Evaluation}
+Table~\ref{tab:occupancy} reports the mIoU of the generated 3D occupancy labels against the nuScenes ground truth on the validation split (17 semantic classes, \texttt{mask\_lidar} evaluation protocol). We compare three pipeline configurations: (i)~a 10-sweep baseline with ground-truth (GT) ego poses, (ii)~a 40-sweep configuration with GT poses as an algorithmic upper bound, and (iii)~a 40-sweep configuration using estimated KISS-SLAM poses, representing the practical deployment setting without access to GT localization.
+
+\begin{table}[t]
+  \caption{3D occupancy label quality on the nuScenes validation split (17 semantic classes, \texttt{mask\_lidar} evaluation).}
+  \label{tab:occupancy}
+  \centering
+  \begin{tabular}{llcc}
+    \toprule
+    Configuration & Pose Backend & Sweeps & mIoU (\%) \\
+    \midrule
+    Baseline & GT pose      & 10 & 48.82 \\
+    Ours     & GT pose      & 40 & 72.27 \\
+    Ours     & KISS-SLAM    & 40 & 58.20 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The GT-pose upper bound of 72.27\% demonstrates that adaptive multi-frame stacking and dynamic box volume filling can produce high-quality occupancy labels when accurate ego poses are available. In the practical KISS-SLAM setting, mIoU decreases to 58.20\%, indicating that pose drift is the primary remaining source of error. The gap between the 10-sweep baseline (48.82\%) and the 40-sweep variant (72.27\% with GT pose) confirms that longer temporal accumulation substantially improves coverage and label completeness in the 3D occupancy representation.
+
+\section{Discussion}
+This extension is intentionally focused: we do not claim to solve all aspects of 3D perception, but rather to improve the quality of the projected pseudo-labels and semantic BEV maps produced by a projection-based pipeline. The current results indicate that front-end semantic quality is an important bottleneck in projected semantic labeling, while the Taiwan BEV examples provide qualitative evidence that cleaner image-space masks can lead to cleaner downstream maps. At the same time, the system remains an offline pipeline because large-scale multimodal reasoning is still computationally expensive. Future work will study lighter prompt-refinement strategies, better handling of currently non-projected LiDAR points, and more comprehensive BEV-level metrics.
+
+\section{Conclusion}
+We presented an extension of a prior auto-labeling pipeline for projected semantic labeling and BEV map generation. The key change is a stronger semantic front-end that improves image-space masks before camera-to-LiDAR projection. Under the shared super-class projected-label protocol used in this paper, the improved front-end and projection pipeline outperform SAL on nuScenes, the resulting 3D occupancy labels reach 72.27\% mIoU with GT poses and 58.20\% with KISS-SLAM, and the Taiwan examples qualitatively show cleaner BEV visualizations. These results support the value of improving image-space semantics before projection while leaving broader occupancy-level evaluation under more challenging localization settings to future work.
+
+\sloppy
+\setlength{\emergencystretch}{1em}
+\hbadness=10000
+\begin{thebibliography}{00}
+\bibitem{nuscenes}
+H. Caesar, V. Bankiti, A. H. Lang, S. Vora, V. E. Liong, Q. Xu, A. Krishnan, Y. Pan, G. Baldan, and O. Beijbom, ``nuScenes: A Multimodal Dataset for Autonomous Driving,'' in \emph{Proc. IEEE/CVF Conf. on Computer Vision and Pattern Recognition (CVPR)}, 2020, pp. 11621--11631.
+
+\bibitem{yolov7}
+C.-Y. Wang, A. Bochkovskiy, and H.-Y. M. Liao, ``YOLOv7: Trainable bag-of-freebies sets new state-of-the-art for real-time object detectors,'' \emph{arXiv:2207.02696}, 2022.
+
+\bibitem{gpt4o_systemcard}
+OpenAI, ``GPT-4o System Card,'' Aug. 8, 2024.
+
+\bibitem{blip2}
+J. Li, D. Li, S. Savarese, and S. C. H. Hoi, ``BLIP-2: Bootstrapping Language-Image Pre-training with Frozen Image Encoders and Large Language Models,'' \emph{arXiv:2301.12597}, 2023.
+
+\bibitem{sam3}
+N. Carion \emph{et al.}, ``SAM 3: Segment Anything with Concepts,'' \emph{arXiv:2511.16719}, 2025.
+
+\bibitem{sal}
+A. O\v{s}ep, T. Meinhardt, F. Ferroni, N. Peri, D. Ramanan, and L. Leal-Taix\'e, ``Better Call SAL: Towards Learning to Segment Anything in Lidar,'' \emph{arXiv:2403.13129}, 2024.
+
+\bibitem{three_d_avs}
+W. Wei, O. \"Ulger, F. K. Nejadasl, T. Gevers, and M. R. Oswald, ``3D-AVS: LiDAR-based 3D Auto-Vocabulary Segmentation,'' in \emph{Proc. IEEE/CVF Conf. on Computer Vision and Pattern Recognition (CVPR)}, 2025, pp. 8910--8920.
+
+\bibitem{three_d_avs_supp}
+W. Wei, O. \"Ulger, F. K. Nejadasl, T. Gevers, and M. R. Oswald, ``3D-AVS: LiDAR-based 3D Auto-Vocabulary Segmentation: Supplementary Material,'' in \emph{Proc. IEEE/CVF Conf. on Computer Vision and Pattern Recognition (CVPR)}, 2025.
+
+\bibitem{tbd_zod}
+M. Bohm, V. Zantedeschi, and E. Eidehall, ``The Zenseact Open Dataset,'' 2023.
+
+\bibitem{tbd_semantickitti}
+J. Behley, M. Garbade, A. Milioto, J. Quenzel, S. Behnke, C. Stachniss, and J. Gall, ``SemanticKITTI: A Dataset for Semantic Scene Understanding of LiDAR Sequences,'' in \emph{Proc. IEEE/CVF Int. Conf. on Computer Vision (ICCV)}, 2019.
+
+\bibitem{tbd_groundingdino}
+S. Liu \emph{et al.}, ``Grounding DINO: Marrying DINO with Grounded Pre-Training for Open-Set Object Detection,'' \emph{arXiv:2303.05499}, 2023.
+
+\bibitem{tbd_sam}
+A. Kirillov \emph{et al.}, ``Segment Anything,'' \emph{arXiv:2304.02643}, 2023.
+
+\bibitem{tbd_sam2video}
+N. Ravi \emph{et al.}, ``SAM 2: Segment Anything in Images and Videos,'' 2024.
+
+\bibitem{qi_offboard3d}
+C. R. Qi, Y. Zhou, M. Najibi, P. Sun, K. Vo, B. Deng, and D. Anguelov, ``Offboard 3D Object Detection from Point Cloud Sequences,'' \emph{arXiv:2103.05073}, 2021.
+\end{thebibliography}
+
+\end{document}
