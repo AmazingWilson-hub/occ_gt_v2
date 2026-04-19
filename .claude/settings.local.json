@@ -31,7 +31,11 @@
       "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git log --oneline -3)",
       "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git log --oneline origin/master -3)",
       "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git commit -m \"Reorganize project structure: occupancy/trajectory/lane_line/tools\")",
-      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git push origin clean-main:master)"
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git push origin clean-main:master)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git log --oneline -5)",
+      "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git log --oneline origin/master -5)",
+      "Bash(crontab -l)",
+      "Bash(chmod +x /data2/t113c52027/occ_gt_v2/autopush/autopush.sh)"
     ]
   }
 }
