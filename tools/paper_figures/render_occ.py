@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Render occupancy grid: BEV (white background) + 3D voxel view via Open3D.
+Render occupancy grid: BEV (white background) + 3D chase-cam view.
 
 Usage:
     python3 render_occ.py \
@@ -47,6 +47,7 @@ CLASS_NAMES = [
 # Grid parameters (nuScenes v3/v4)
 VOXEL_SIZE = 0.4   # metres
 MIN_BOUND  = np.array([-40.0, -40.0, -1.0])
+VIEW_RANGE = 35.0
 
 
 def load_grid(npz_path):
@@ -86,94 +87,71 @@ def render_bev(grid, out_path):
     print(f'BEV saved: {out_path}')
 
 
-# ── 3D Open3D ────────────────────────────────────────────────────────────────
+# ── 3D chase-cam (same projection as tools/compare_video/renderer.py) ────────
 
 
-def render_3d(grid, out_path, elev_deg=28, occ_w=1200, occ_h=700,
-              view_range=35.0, z_offset=-2.0, voxel_style='flat'):
+def render_3d(grid, out_path, elev_deg=28, occ_w=1200, occ_h=700, z_offset=-2.0):
     """
-    Chase-cam style 3D render, same projection as tools/compare_video/renderer.py.
-    White background, RGB output.
+    Chase-cam 3D render identical to tools/compare_video/renderer.py.
+    x_2d = -py, y_2d = px*sin(el) + pz*cos(el), depth = -px*cos(el) + pz*sin(el).
+    Block rendering with z-height brightness. White background.
     """
+    import cv2
+
     occupied = (grid != 17) & (grid != 0)
+    if not np.any(occupied):
+        cv2.imwrite(out_path, np.full((occ_h, occ_w, 3), 255, dtype=np.uint8))
+        return
+
     xs, ys, zs = np.where(occupied)
     px = (xs - 100.0) * VOXEL_SIZE
     py = (ys - 100.0) * VOXEL_SIZE
     pz = zs * VOXEL_SIZE + z_offset
-
     labels = grid[xs, ys, zs]
-    colors = OCC3D_COLORS[labels].astype(np.float32)
 
-    import cv2
-
-    elev = np.radians(elev_deg)
+    elev  = np.radians(elev_deg)
     se, ce = np.sin(elev), np.cos(elev)
-    scale = occ_w / (2.0 * view_range)
-    B = max(3, int(np.ceil(VOXEL_SIZE * scale)))   # block size in pixels
 
-    # Project voxel bottom-left corner to screen
-    # Each voxel (xi, yi, zi): world offset per voxel unit:
-    #   +x → screen (0,       -se*scale*V)
-    #   +y → screen (-scale*V, 0         )
-    #   +z → screen (0,       -ce*scale*V)
-    V = VOXEL_SIZE
-    dx_x, dy_x = 0,            int(se * scale * V)   # +x moves up
-    dx_y, dy_y = int(scale*V), 0                     # +y moves right
-    dx_z, dy_z = 0,            int(ce * scale * V)   # +z moves up
+    scale      = occ_w / (2.0 * VIEW_RANGE)
+    block_size = max(4, int(np.ceil(VOXEL_SIZE * scale)))
 
-    ego_sx = occ_w // 2
-    ego_sy = int(occ_h * 0.68)
+    # z-height brightness: same as renderer.py flat mode (0.6 + 0.4*z_norm)
+    z_norm = (pz - pz.min()) / (pz.max() - pz.min() + 1e-6)
+    colors = OCC3D_COLORS[labels].astype(np.float32)
+    colors = np.clip(colors * (0.6 + 0.4 * z_norm)[:, np.newaxis], 0, 255).astype(np.uint8)
 
-    def world_to_screen(px_, py_, pz_):
-        sx = int(-py_ * scale + ego_sx)
-        sy = int(ego_sy - (px_ * se + pz_ * ce) * scale)
-        return sx, sy
-
-    canvas = np.full((occ_h, occ_w, 3), 255, dtype=np.uint8)
-
-    # sort back-to-front for painter's algorithm
+    # same projection as renderer.py
     x_2d  = -py
     y_2d  =  px * se + pz * ce
     depth = -px * ce + pz * se
+
+    ego_sx = occ_w // 2
+    ego_sy = int(occ_h * 0.70)
+    x_scr  = (x_2d * scale + ego_sx).astype(np.int32)
+    y_scr  = (ego_sy - y_2d * scale).astype(np.int32)
+
+    margin  = block_size
+    visible = ((x_scr >= -margin) & (x_scr < occ_w + margin) &
+               (y_scr >= -margin) & (y_scr < occ_h + margin))
+    x_scr, y_scr = x_scr[visible], y_scr[visible]
+    colors, depth = colors[visible], depth[visible]
+
     order = np.argsort(depth)
+    x_s, y_s, c_s = x_scr[order], y_scr[order], colors[order]
 
-    colors_base = OCC3D_COLORS[labels]
+    # vectorised block paint
+    B = block_size
+    oy, ox = np.mgrid[0:B, 0:B]
+    offsets = np.stack([ox.ravel(), oy.ravel()], axis=1)
+    n_v, n_o = len(x_s), len(offsets)
 
-    for idx in order:
-        sx, sy = world_to_screen(px[idx], py[idx], pz[idx])
+    x_all = np.repeat(x_s, n_o) + np.tile(offsets[:, 0], n_v)
+    y_all = np.repeat(y_s, n_o) + np.tile(offsets[:, 1], n_v)
+    c_all = np.repeat(c_s, n_o, axis=0)
 
-        c = colors_base[idx].astype(np.float32)
-        c_top   = np.clip(c * 1.00, 0, 255).astype(np.uint8)
-        c_front = np.clip(c * 0.65, 0, 255).astype(np.uint8)
-        c_side  = np.clip(c * 0.45, 0, 255).astype(np.uint8)
-
-        # Top face: parallelogram spanned by +x and +y offsets
-        top = np.array([
-            [sx,              sy],
-            [sx + dx_x,       sy - dy_x],
-            [sx + dx_x+dx_y,  sy - dy_x - dy_y],
-            [sx + dx_y,       sy - dy_y],
-        ], dtype=np.int32)
-
-        # Front face: spanned by +x and +z offsets (y face, viewer side)
-        front = np.array([
-            [sx + dx_y,           sy - dy_y],
-            [sx + dx_x + dx_y,    sy - dy_x - dy_y],
-            [sx + dx_x + dx_y,    sy - dy_x - dy_y - dy_z],
-            [sx + dx_y,           sy - dy_y - dy_z],
-        ], dtype=np.int32)
-
-        # Side face: spanned by +y and +z offsets (x face, viewer side)
-        side = np.array([
-            [sx,              sy],
-            [sx + dx_y,       sy - dy_y],
-            [sx + dx_y,       sy - dy_y - dy_z],
-            [sx,              sy - dy_z],
-        ], dtype=np.int32)
-
-        cv2.fillPoly(canvas, [side],  c_side.tolist())
-        cv2.fillPoly(canvas, [front], c_front.tolist())
-        cv2.fillPoly(canvas, [top],   c_top.tolist())
+    valid  = (x_all >= 0) & (x_all < occ_w) & (y_all >= 0) & (y_all < occ_h)
+    canvas = np.full((occ_h, occ_w, 3), 255, dtype=np.uint8)
+    canvas[y_all[valid], x_all[valid]] = c_all[valid]
 
     cv2.imwrite(out_path, canvas[:, :, ::-1])
     print(f'3D saved: {out_path}')
