@@ -19,6 +19,10 @@ GT_BOUNDS = [-40.0, -40.0, -3.0, 40.0, 40.0, 5.4]
 GT_VOXEL  = 0.4
 GT_GRID   = (200, 200, 21)
 
+# boxes_lidar Z is in ground-plane frame (Z=0=ground),
+# but point cloud Z=0 is the LiDAR sensor (~1.8m above ground)
+BOX_Z_SHIFT = -1.8
+
 LBL_FREE    = 17
 LBL_MANMADE = 15
 LBL_ROAD    = 11
@@ -454,9 +458,11 @@ def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output', num
     for item in box_data:
         fid = item['file_name'].replace('.pcd', '')
         valid = item['score'] >= 0.4
+        boxes = item['boxes_lidar'][valid].copy()
+        boxes[:, 2] += BOX_Z_SHIFT
         box_dict[fid] = {
             'names':       item['name'][valid],
-            'boxes_lidar': item['boxes_lidar'][valid],
+            'boxes_lidar': boxes,
             'pred_labels': item['pred_labels'][valid],
         }
 
@@ -475,9 +481,11 @@ def generate_occupancy_raw(dataroot, pose_dict, num_sweeps=40, out_dir='output',
     for item in box_data:
         fid = item['file_name'].replace('.pcd', '')
         valid = item['score'] >= 0.4
+        boxes = item['boxes_lidar'][valid].copy()
+        boxes[:, 2] += BOX_Z_SHIFT
         box_dict[fid] = {
             'names':       item['name'][valid],
-            'boxes_lidar': item['boxes_lidar'][valid],
+            'boxes_lidar': boxes,
             'pred_labels': item['pred_labels'][valid],
         }
 
@@ -496,9 +504,11 @@ def generate_occupancy_heuristic(dataroot, pose_dict, num_sweeps=40, out_dir='ou
     for item in box_data:
         fid = item['file_name'].replace('.pcd', '')
         valid = item['score'] >= 0.4
+        boxes = item['boxes_lidar'][valid].copy()
+        boxes[:, 2] += BOX_Z_SHIFT
         box_dict[fid] = {
             'names':       item['name'][valid],
-            'boxes_lidar': item['boxes_lidar'][valid],
+            'boxes_lidar': boxes,
             'pred_labels': item['pred_labels'][valid],
         }
 
