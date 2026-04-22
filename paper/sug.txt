@@ -1,0 +1,17 @@
+1. problem statement 要描述现实场景缺乏ego-pose导致方法impratical paper提出的方法如何利用sensor有效地趋近ego-pose 2. problem statement 描述现实场景参数错误放大迭代误差，后续如何进行修正
+
+occupancy 还有其他baseline？
+
+可以参考这篇，occ part
+
+exp 是实验设置，环境，evaluation metric, dataset, baseline 等的描述
+
+result 部分开多一个新的subsection
+
+result and discussion 进行讨论
+
+baseline 这里换成其他方法
+
+单纯可视化没意义
+
+有对比才知道paper提的方法的有效性
