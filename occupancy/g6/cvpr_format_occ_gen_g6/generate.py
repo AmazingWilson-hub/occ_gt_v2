@@ -441,7 +441,7 @@ def _get_pcd_dir(dataroot):
     return d
 
 
-def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16):
+def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None):
     pcd_files = sorted(glob.glob(os.path.join(_get_pcd_dir(dataroot), '*.pcd')))
     for _sem_candidate in ['result_depth_filtered_v2', 'result_depth_filtered', 'colored_360_pcd_filter']:
         _sem_dir = os.path.join(dataroot, _sem_candidate)
@@ -467,12 +467,16 @@ def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output', num
         }
 
     frames = [os.path.splitext(os.path.basename(f))[0] for f in pcd_files[:n]]
+    if only_frame is not None:
+        idx = [i for i, f in enumerate(frames) if f == only_frame]
+        frames = [frames[i] for i in idx]
+        sem_files = [sem_files[i] for i in idx]
     os.makedirs(out_dir, exist_ok=True)
-    total = _run_pool(_seg_worker, (frames, sem_files, pose_dict, box_dict, num_sweeps, out_dir), n, num_workers, 'SEG')
+    total = _run_pool(_seg_worker, (frames, sem_files, pose_dict, box_dict, num_sweeps, out_dir), len(frames), num_workers, 'SEG')
     print(f"\n[SEG Complete] {total} dynamic voxels filled by 3D Box")
 
 
-def generate_occupancy_raw(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16):
+def generate_occupancy_raw(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None):
     pcd_files = sorted(glob.glob(os.path.join(_get_pcd_dir(dataroot), '*.pcd')))
     print(f"[INFO] RAW 模式：{len(pcd_files)} 幀，workers={num_workers}")
 
@@ -490,12 +494,16 @@ def generate_occupancy_raw(dataroot, pose_dict, num_sweeps=40, out_dir='output',
         }
 
     frames = [os.path.splitext(os.path.basename(f))[0] for f in pcd_files]
+    if only_frame is not None:
+        idx = [i for i, f in enumerate(frames) if f == only_frame]
+        frames = [frames[i] for i in idx]
+        pcd_files = [pcd_files[i] for i in idx]
     os.makedirs(out_dir, exist_ok=True)
     total = _run_pool(_raw_worker, (frames, pcd_files, pose_dict, box_dict, num_sweeps, out_dir), len(frames), num_workers, 'RAW', preload_pcd=True)
     print(f"\n[RAW Complete] {total} dynamic voxels filled by 3D Box")
 
 
-def generate_occupancy_heuristic(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16):
+def generate_occupancy_heuristic(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None):
     pcd_files = sorted(glob.glob(os.path.join(_get_pcd_dir(dataroot), '*.pcd')))
     print(f"[INFO] HEURISTIC 模式：{len(pcd_files)} 幀，workers={num_workers}")
 
@@ -513,6 +521,10 @@ def generate_occupancy_heuristic(dataroot, pose_dict, num_sweeps=40, out_dir='ou
         }
 
     frames = [os.path.splitext(os.path.basename(f))[0] for f in pcd_files]
+    if only_frame is not None:
+        idx = [i for i, f in enumerate(frames) if f == only_frame]
+        frames = [frames[i] for i in idx]
+        pcd_files = [pcd_files[i] for i in idx]
     os.makedirs(out_dir, exist_ok=True)
     total = _run_pool(_heuristic_worker, (frames, pcd_files, pose_dict, box_dict, num_sweeps, out_dir), len(frames), num_workers, 'HEURISTIC', preload_pcd=True)
     print(f"\n[HEURISTIC Complete] {total} dynamic voxels filled by 3D Box")
@@ -528,6 +540,8 @@ def main():
     parser.add_argument('--data_root',   default='/data2/t113c52027/occ_gt_v2/data/g6')
     parser.add_argument('--out_root',    default=os.path.join(os.path.dirname(__file__), 'output'))
     parser.add_argument('--num_workers', type=int, default=16)
+    parser.add_argument('--frame',       type=str, default=None,
+                        help='Only process this single frame id (e.g. 000044)')
     args = parser.parse_args()
 
     scene_path = os.path.join(args.data_root, args.scene)
@@ -556,17 +570,17 @@ def main():
     if args.mode in ('semantic', 'all'):
         generate_occupancy(scene_path, pose_dict, args.sweeps,
                            out_dir=os.path.join(scene_out, 'seg'),
-                           num_workers=args.num_workers)
+                           num_workers=args.num_workers, only_frame=args.frame)
 
     if args.mode in ('raw', 'all'):
         generate_occupancy_raw(scene_path, pose_dict, args.sweeps,
                                out_dir=os.path.join(scene_out, 'raw'),
-                               num_workers=args.num_workers)
+                               num_workers=args.num_workers, only_frame=args.frame)
 
     if args.mode in ('heuristic', 'all'):
         generate_occupancy_heuristic(scene_path, pose_dict, args.sweeps,
                                      out_dir=os.path.join(scene_out, 'heuristic'),
-                                     num_workers=args.num_workers)
+                                     num_workers=args.num_workers, only_frame=args.frame)
 
 
 if __name__ == '__main__':
