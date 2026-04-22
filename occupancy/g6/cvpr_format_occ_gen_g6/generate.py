@@ -22,6 +22,7 @@ GT_GRID   = (200, 200, 21)
 # boxes_lidar Z is in ground-plane frame (Z=0=ground),
 # but point cloud Z=0 is the LiDAR sensor (~1.8m above ground)
 BOX_Z_SHIFT = -1.8
+EGO_BOX_RADIUS = 4.0   # metres — boxes within this XY radius from origin = ego vehicle
 
 LBL_FREE    = 17
 LBL_MANMADE = 15
@@ -267,7 +268,10 @@ def _seg_worker(i):
 
     filled = 0
     if len(curr_boxes['names']) > 0:
-        occ, filled = fill_box_interior(occ, curr_boxes['boxes_lidar'], curr_boxes['names'], GT_BOUNDS, GT_VOXEL, GT_GRID)
+        _boxes = curr_boxes['boxes_lidar']
+        _names = curr_boxes['names']
+        _non_ego = np.hypot(_boxes[:, 0], _boxes[:, 1]) > EGO_BOX_RADIUS
+        occ, filled = fill_box_interior(occ, _boxes[_non_ego], _names[_non_ego], GT_BOUNDS, GT_VOXEL, GT_GRID)
 
     save_path = os.path.join(out_dir, frame_id)
     os.makedirs(save_path, exist_ok=True)
@@ -331,7 +335,10 @@ def _raw_worker(i):
 
     filled = 0
     if len(curr_boxes['names']) > 0:
-        occ, filled = fill_box_interior(occ, curr_boxes['boxes_lidar'], curr_boxes['names'], GT_BOUNDS, GT_VOXEL, GT_GRID)
+        _boxes = curr_boxes['boxes_lidar']
+        _names = curr_boxes['names']
+        _non_ego = np.hypot(_boxes[:, 0], _boxes[:, 1]) > EGO_BOX_RADIUS
+        occ, filled = fill_box_interior(occ, _boxes[_non_ego], _names[_non_ego], GT_BOUNDS, GT_VOXEL, GT_GRID)
 
     save_path = os.path.join(out_dir, frame_id)
     os.makedirs(save_path, exist_ok=True)
@@ -400,7 +407,10 @@ def _heuristic_worker(i):
 
     filled = 0
     if len(curr_boxes['names']) > 0:
-        occ, filled = fill_box_interior(occ, curr_boxes['boxes_lidar'], curr_boxes['names'], GT_BOUNDS, GT_VOXEL, GT_GRID)
+        _boxes = curr_boxes['boxes_lidar']
+        _names = curr_boxes['names']
+        _non_ego = np.hypot(_boxes[:, 0], _boxes[:, 1]) > EGO_BOX_RADIUS
+        occ, filled = fill_box_interior(occ, _boxes[_non_ego], _names[_non_ego], GT_BOUNDS, GT_VOXEL, GT_GRID)
 
     save_path = os.path.join(out_dir, frame_id)
     os.makedirs(save_path, exist_ok=True)
