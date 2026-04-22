@@ -1,0 +1,160 @@
+% !TEX program = pdflatex
+\documentclass{IEEE_lsens/IEEE_lsens}
+
+\usepackage{textcomp}
+\usepackage[noadjust]{cite}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage[caption=false,font=footnotesize]{subfig}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\raggedbottom
+\hyphenation{cross-modal auto-labeling mul-ti-frame seman-tic occu-pan-cy}
+\setlength{\textfloatsep}{7pt plus 1pt minus 2pt}
+\setlength{\floatsep}{6pt plus 1pt minus 2pt}
+\setlength{\dbltextfloatsep}{8pt plus 1pt minus 2pt}
+\setlength{\abovecaptionskip}{2pt}
+\setlength{\belowcaptionskip}{0pt}
+
+\begin{document}
+
+\markboth{IEEE Sensors Letters,~Vol.~XX, No.~XX, Month~2026}{Anonymous Submission}
+
+\IEEELSENSarticlesubject{Sensor Applications}
+
+\title{High-Fidelity 3D Occupancy and BEV Generation via Semantic Uncertainty Reduction and Cross-Modal LiDAR--Camera Alignment}
+
+\author{\IEEEauthorblockN{Anonymous Authors}}
+
+\IEEELSENSmanuscriptreceived{Manuscript received Month XX, 2026; revised Month XX, 2026; accepted Month XX, 2026. Date of publication Month XX, 2026; date of current version Month XX, 2026.}
+
+\IEEEtitleabstractindextext{%
+\begin{abstract}
+Reliable 3D perception depends on fusing LiDAR geometry with camera semantics, yet projection-based pipelines remain vulnerable to sparse returns, occlusion, and calibration drift. We present a modular LiDAR--camera fusion framework that reduces semantic uncertainty in image space, performs calibration-based cross-modal sensor alignment, and converts the aligned semantic point cloud into dense multi-frame sensor representations for 3D occupancy and Bird's-Eye-View (BEV) generation. The semantic front-end couples detector-guided SAM~3 segmentation with a single GPT-4o verification round that is invoked only for static masks with abnormal coverage or fragmentation. Because foundation-model verification is computationally expensive, the system is configured as an offline auto-labeling pipeline rather than an onboard real-time module. The refined semantics are projected into LiDAR space, fused across views and frames, and voxelized into a $200\times200\times16$ occupancy tensor while being rasterized into a semantic BEV map. On nuScenes, the proposed pipeline improves projected semantic point-cloud labeling mIoU from 52.6\% to 58.7\% over the SAL baseline under the SAL-defined six-super-class protocol and reaches 39.4\% on the official 16-class lidarSeg benchmark. For dense occupancy representation, the same pipeline achieves 72.27\% mIoU with ground-truth poses and 58.20\% with estimated poses. Preliminary Taiwan mixed-traffic testing further indicates improved semantic alignment while underscoring the difficulty of clean 3D occupancy generation under severe occlusion and uncertain localization.
+\end{abstract}
+
+\begin{IEEEkeywords}
+LiDAR--camera fusion, semantic uncertainty reduction, cross-modal sensor alignment, dense multi-frame sensor representation, semantic occupancy, BEV generation
+\end{IEEEkeywords}}
+
+\maketitle
+
+\section{Introduction}
+Reliable 3D perception in autonomous driving relies on complementary sensors. LiDAR provides accurate geometry but sparse and semantically weak point clouds, whereas cameras provide dense appearance cues but suffer from occlusion and lack direct depth measurements. Projection-based auto-labeling is therefore attractive because it transfers 2D semantics into 3D without exhaustive manual annotation. In this work, the pipeline is positioned as an offline auto-labeling system rather than an onboard real-time module, allowing selective foundation-model verification to prioritize labeling fidelity over latency. However, recent \emph{IEEE Sensors Journal} studies show that multi-sensor performance is highly sensitive to extrinsic calibration, receptive-field mismatch, and robust BEV transformation under perturbation~\cite{calib_review,joint_calib,cross_fusion,bft3d}.
+
+These limitations are amplified in Taiwan mixed-traffic scenes, where narrow alleys, dense scooters, and heavy roadside infrastructure simultaneously increase semantic ambiguity and occlusion. Sparse single-frame LiDAR also weakens dense occupancy representation, and the problem becomes more severe when multi-frame accumulation depends on estimated ego motion rather than ground-truth poses~\cite{multi_loc,occ_sparse,map_tsc}. Fig.~\ref{fig:taiwan-scene} shows a representative Taiwan scene with these mixed-traffic characteristics.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\linewidth]{fig1.jpg}
+  \caption{Representative Taiwan mixed-traffic scene illustrating the dense occlusion and roadside clutter that challenge semantic uncertainty reduction and cross-modal LiDAR--camera alignment.}
+  \label{fig:taiwan-scene}
+\end{figure}
+
+We address this problem by recasting the pipeline around three sensor-centric ideas: \emph{semantic uncertainty reduction} before projection, \emph{cross-modal sensor alignment} during projection, and \emph{dense multi-frame sensor representation} after temporal fusion. The main contributions are:
+\begin{itemize}
+  \item An uncertainty-reduced LiDAR--camera semantic front-end that combines detector prompts, SAM~3 segmentation, and one-round GPT-4o verification only when static masks are unreliable.
+  \item A calibration-based cross-modal alignment mechanism that preserves nonprojected LiDAR points as an uncertainty-aware \emph{Potential Obstacle} state instead of discarding them.
+  \item A dense multi-frame sensor representation that jointly supports semantic BEV generation and 3D occupancy representation, achieving strong performance on nuScenes while revealing the remaining challenge of deployment under severe occlusion and pose uncertainty.
+\end{itemize}
+
+\section{Proposed Framework}
+Fig.~\ref{fig:pipeline-compact} summarizes the proposed modular pipeline. The left block reduces image-space semantic uncertainty; the middle block performs calibration-based cross-modal sensor alignment; the right block accumulates aligned semantic points into dense multi-frame representations for BEV and dense occupancy representation.
+
+\begin{figure*}[!t]
+  \centering
+  \includegraphics[width=0.94\textwidth]{pipeline_cropped.png}
+  \caption{Pipeline overview. Detector-guided SAM~3 segmentation and selective GPT-4o verification reduce image-space semantic uncertainty. Calibration then supports cross-modal LiDAR--camera alignment, temporal fusion, semantic BEV generation, and dense occupancy representation, while unresolved out-of-view regions are retained as an uncertainty state.}
+  \label{fig:pipeline-compact}
+\end{figure*}
+
+\textbf{Semantic uncertainty reduction via ambiguity proxy:} To quantify uncertainty without relying on computationally prohibitive dense entropy maps, dynamic agents are first localized by YOLOv7~\cite{yolov7} and then segmented by SAM~3~\cite{sam3}. Static classes use the same SAM~3 backbone with a fixed semantic vocabulary, after which lightweight coverage and fragmentation checks identify uncertain masks. Only those uncertain static regions trigger a single GPT-4o verification round~\cite{gpt4o_systemcard}. This design keeps the semantic front-end modular while restricting large-model verification to failure-prone cases rather than the full dataset.
+
+\textbf{Cross-modal sensor alignment:} Let the homogeneous LiDAR point be $\tilde{\mathbf{p}}_{l}=[x_l,\,y_l,\,z_l,\,1]^T$. Projection into the camera frame uses the calibrated transform
+\begin{equation}
+\tilde{\mathbf{p}}_{c}=\mathbf{T}_{c\leftarrow l}\,\tilde{\mathbf{p}}_{l},
+\label{eq:extrinsic}
+\end{equation}
+followed by normalized image coordinates $x_n=x_c/z_c$ and $y_n=y_c/z_c$ for $z_c>0$. Pixel coordinates are then obtained via $\mathbf{q}\sim\mathbf{K}\mathbf{x}_u$, where $\mathbf{q}=[u\,v\,1]^T$ and $\mathbf{x}_u=[x_u\,y_u\,1]^T$. If $(u,v)$ lands on a valid refined mask, the LiDAR point inherits that semantic label; otherwise it is retained in an uncertainty-aware \emph{Potential Obstacle} state. Beyond capturing field-of-view mismatch, this state provides a critical safety buffer against minor extrinsic calibration drift caused by sensor vibrations, inherently increasing the fault tolerance of the projection pipeline. Multi-camera systems repeat the same operation independently and fuse the resulting labels in the LiDAR frame.
+
+\textbf{Dense multi-frame sensor representation:} The aligned semantic cloud is accumulated over multiple sweeps to compensate for single-frame sparsity. Static classes use a longer ego-motion-compensated window, while dynamic objects use a shorter window with box-local alignment to reduce ghosting. Empty voxels inside the current 3D boxes are filled with the box label, converting sparse surface shells into denser object volumes. The same accumulated cloud is then (i) orthographically rasterized into a semantic BEV map and (ii) voxelized into a $200\times200\times16$ tensor spanning $[-40,40]\times[-40,40]\times[-1,5.4]$~m. When ground-truth poses are unavailable, the temporal accumulation uses estimated SLAM poses so that deployment-oriented degradation can be measured explicitly. Together, these steps define the full sensor-centric representation evaluated next.
+
+\section{Experiments}
+We evaluate on the nuScenes validation split (6019 frames) for quantitative analysis and on a custom Taiwan traffic dataset (6587 synchronized frames) for domain-shift stress testing. The SAL comparison uses SAL as the projected semantic point-cloud labeling baseline and adopts the SAL-defined six-super-class protocol, the 3D-AVS comparison follows the official 16-class nuScenes lidarSeg benchmark, and dense occupancy representation evaluation uses the 17-class \texttt{mask\_lidar} protocol. All compared projected semantic point clouds are passed through the same downstream BEV backend to isolate the effect of the SAM~3-based semantic front-end.
+
+\begin{table*}[!t]
+  \caption{Sensor-centric evaluation on nuScenes for semantic uncertainty reduction, cross-modal alignment, and dense multi-frame 3D representation.}
+  \label{tab:comprehensive}
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{llll}
+    \toprule
+    Evaluation Target & Method & Protocol / Condition & mIoU (\%) \\
+    \midrule
+    Projected semantic point-cloud labeling & SAL~\cite{sal} & SAL 6 super-classes & 52.6 \\
+    Projected semantic point-cloud labeling & Ours & SAL 6 super-classes & \textbf{58.7} \\
+    Semantic point-cloud evaluation & 3D-AVS~\cite{three_d_avs} & Image & 34.6 \\
+    Semantic point-cloud evaluation & 3D-AVS~\cite{three_d_avs} & LiDAR & 33.4 \\
+    Semantic point-cloud evaluation & 3D-AVS~\cite{three_d_avs} & Image+LiDAR & 36.2 \\
+    Semantic point-cloud evaluation & Ours & Image+LiDAR & \textbf{39.4} \\
+    Dense occupancy representation & Ours & GT pose, 10 sweeps & 48.82 \\
+    Dense occupancy representation & Ours & GT pose, 40 sweeps & \textbf{72.27} \\
+    Dense occupancy representation & Ours & estimated pose, 40 sweeps & 58.20 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+Table~\ref{tab:comprehensive} shows that the proposed SAM~3-based semantic front-end improves projected semantic point-cloud labeling mIoU by 6.1 points over the SAL baseline under the SAL-defined six-super-class protocol. Specifically, an internal ablation shows that the GPT-4o verification step improves the projected mIoU from 55.54\% (using the SAM~3 baseline alone) to 58.7\%, yielding a 3.16\% absolute improvement that confirms the value of targeted large-model reasoning. Under the official 16-class lidarSeg benchmark, our projected semantic point cloud also exceeds the fused 3D-AVS result by 3.2 points, suggesting that uncertainty-reduced image semantics remain competitive even under a standard semantic point-cloud evaluation protocol. For dense occupancy representation, increasing the accumulation window from 10 to 40 sweeps boosts mIoU from 48.82\% to 72.27\% when accurate poses are available, while the drop to 58.20\% under estimated poses quantifies the deployment cost of temporal misalignment rather than a failure of cross-modal semantics.
+
+\begin{figure*}[!t]
+  \centering
+  \subfloat[Multi-view camera inputs]{\includegraphics[width=0.985\textwidth]{occupancy image/cam_6view.png}}\\[-2pt]
+  \subfloat[Dense 3D semantic occupancy]{\includegraphics[width=0.60\textwidth]{occupancy image/occ_3d_view.png}}\hfill
+  \subfloat[Semantic BEV projection]{\includegraphics[width=0.31\textwidth]{occupancy image/occ_bev_visualization.png}}
+  \caption{Qualitative results of the dense multi-frame sensor representation on the nuScenes dataset. (a) Multi-view RGB inputs with complex urban semantics. (b) The fused 3D semantic occupancy grid demonstrating robust spatial structure. (c) The corresponding Bird's-Eye-View (BEV) rasterization, showing clear separation of dynamic agents and static road elements.}
+  \label{fig:qualitative}
+\end{figure*}
+
+Fig.~\ref{fig:qualitative} presents a qualitative nuScenes example of the dense multi-frame sensor representation. The six camera views depict a construction-heavy urban scene, the fused 3D occupancy grid preserves lane geometry and object extent in 3D, and the semantic BEV projection cleanly separates dynamic agents from static road elements.
+
+While the full dense occupancy pipeline is quantitatively and qualitatively validated on the nuScenes benchmark (Fig.~\ref{fig:qualitative}), preliminary testing on the custom Taiwan mixed-traffic dataset reveals that although 2D semantic alignment improves, generating clean 3D occupancy grids remains highly challenging because ground-truth localization is unavailable and dynamic occlusion is severe. This observation highlights robust pose estimation under dense occlusion as an important direction for future multi-sensor fusion research.
+
+\section{Conclusion}
+In conclusion, the proposed modular LiDAR--camera fusion framework addresses the inherent sparsity and semantic ambiguity in projection-based 3D perception. Using SAM~3 as the primary segmentation engine and GPT-4o as a selective verification stage for semantic uncertainty reduction before cross-modal alignment improves dense 3D perception under projection-based sensing constraints. Due to the computational overhead of foundation models, the system is designed as an offline auto-labeling pipeline rather than for onboard real-time inference. Furthermore, the Taiwan dataset is deliberately utilized as a zero-shot stress test without domain-specific fine-tuning. The qualitative results demonstrate that while physics-based cross-modal alignment generalizes well under severe domain shift, generating clean 3D occupancy remains fundamentally bottlenecked by the lack of ground-truth ego-poses. Future work will focus on online pose-uncertainty compensation and lighter verification modules around the SAM~3 semantic front-end.
+
+\sloppy
+\setlength{\emergencystretch}{1em}
+\hbadness=10000
+\begin{thebibliography}{00}
+\bibitem{nuscenes}
+H. Caesar \emph{et al.}, ``nuScenes: A multimodal dataset for autonomous driving,'' in \emph{Proc. IEEE/CVF CVPR}, 2020, pp. 11621--11631.
+\bibitem{yolov7}
+C.-Y. Wang, A. Bochkovskiy, and H.-Y. M. Liao, ``YOLOv7: Trainable bag-of-freebies sets new state-of-the-art for real-time object detectors,'' \emph{arXiv:2207.02696}, 2022.
+\bibitem{sam3}
+N. Carion \emph{et al.}, ``SAM 3: Segment Anything with Concepts,'' \emph{arXiv:2511.16719}, 2025.
+\bibitem{gpt4o_systemcard}
+OpenAI, ``GPT-4o system card,'' 2024.
+\bibitem{sal}
+A. O\v{s}ep \emph{et al.}, ``Better call SAL: Towards learning to segment anything in lidar,'' \emph{arXiv:2403.13129}, 2024.
+\bibitem{three_d_avs}
+W. Wei, O. \"Ulger, F. K. Nejadasl, T. Gevers, and M. R. Oswald, ``3D-AVS: LiDAR-based 3D auto-vocabulary segmentation,'' in \emph{Proc. IEEE/CVF CVPR}, 2025, pp. 8910--8920.
+\bibitem{calib_review}
+H. Zhang, S. Li, X. Zhu, H. Chen, and X. Yue, ``3D LiDAR and monocular camera calibration: A review,'' \emph{IEEE Sensors Journal}, vol. 25, no. 7, pp. 10530--10555, 2025.
+\bibitem{joint_calib}
+Y. Xi, W. Zhu, Z. Ding, and L. Liu, ``A novel LiDAR--camera joint calibration network based on cross-modal feature fusion,'' \emph{IEEE Sensors Journal}, vol. 25, no. 21, pp. 40849--40860, 2025.
+\bibitem{cross_fusion}
+B. Chen, H. Shen, Z. Zhao, L. Yu, and Y. Zhao, ``LiDAR--camera cross fusion network toward 3-D object detection in self-driving,'' \emph{IEEE Sensors Journal}, vol. 25, no. 12, pp. 21857--21866, 2025.
+\bibitem{multi_loc}
+G. S. Hocao\u{g}lu and E. Benli, ``Multiple objects localization with camera-LIDAR sensor fusion,'' \emph{IEEE Sensors Journal}, vol. 25, no. 7, pp. 11892--11905, 2025.
+\bibitem{bft3d}
+B. Liu and Y. Wu, ``BFT3D: A robust BEV feature transformation module for multi-sensor 3-D object detection,'' \emph{IEEE Sensors Journal}, vol. 25, no. 15, pp. 30175--30185, 2025.
+\bibitem{occ_sparse}
+P. Zhai, G. Joseph, N. J. Myers, \c{C}. \"Onen, and A. Pandharipande, ``Spatial sparsity-aware radar-LiDAR fusion for occupancy grid mapping in automotive driving,'' \emph{IEEE Sensors Journal}, vol. 25, no. 17, pp. 33328--33338, 2025.
+\bibitem{map_tsc}
+T. Zhang, Y. Chen, W. Zhou, W. Zhang, G. Wang, Y. Zhang, and J. Hu, ``A real-time mapping system with temporal scan context via odometry local trajectories,'' \emph{IEEE Sensors Journal}, vol. 25, no. 6, pp. 9986--9997, 2025.
+
+\end{thebibliography}
+
+\end{document}
