@@ -17,24 +17,24 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 # Occ3D 17-class color map (RGB 0-255)
 OCC3D_COLORS = np.array([
-    [ 80,  80,  80],   # 0:  others
+    [  0,   0,   0],   # 0:  noise
     [112, 128, 144],   # 1:  barrier
-    [220,  20,  60],   # 2:  bicycle
-    [255, 158,   0],   # 3:  bus
-    [255, 158,   0],   # 4:  car
-    [233, 150,  70],   # 5:  construction_vehicle
-    [255, 100,  50],   # 6:  motorcycle
-    [  0,   0, 230],   # 7:  pedestrian
-    [255, 215,   0],   # 8:  traffic_cone
-    [255, 140,   0],   # 9:  trailer
-    [205,  92,  92],   # 10: truck
-    [  0, 207, 191],   # 11: driveable_surface
-    [135, 206, 235],   # 12: other_flat
-    [ 75,   0,  75],   # 13: sidewalk
-    [ 50, 180, 100],   # 14: terrain
-    [222, 184, 135],   # 15: manmade
-    [  0, 175,   0],   # 16: vegetation
-    [255, 255, 255],   # 17: free  <- white background
+    [235, 191,  43],   # 2:  bicycle
+    [255,  91,  33],   # 3:  bus
+    [220,  20,  60],   # 4:  car
+    [255,  91,  33],   # 5:  construction_vehicle
+    [135,  61,   0],   # 6:  motorcycle
+    [ 75,   0,  76],   # 7:  pedestrian
+    [112, 128, 144],   # 8:  traffic_cone
+    [255,  91,  33],   # 9:  trailer
+    [255,  91,  33],   # 10: truck
+    [215, 150, 248],   # 11: driveable_surface (purple)
+    [247, 206,  70],   # 12: other_flat
+    [247, 206,  70],   # 13: sidewalk
+    [152, 251, 152],   # 14: terrain
+    [247, 206,  70],   # 15: manmade
+    [152, 251, 152],   # 16: vegetation
+    [ 50,  50,  50],   # 17: free  <- dark gray background
     [255, 255, 100],   # 18: lane line (light yellow)
 ], dtype=np.uint8)
 
@@ -65,14 +65,14 @@ def render_bev(grid, out_path):
         mask = sl != 17
         bev[mask] = sl[mask]
 
-    rgb = OCC3D_COLORS[bev]   # white where free
+    rgb = OCC3D_COLORS[bev]   # dark gray where free
 
     present = np.unique(bev)
     present = present[present != 17]
 
-    fig, ax = plt.subplots(figsize=(6, 6), facecolor='white')
+    fig, ax = plt.subplots(figsize=(6, 6), facecolor='#323232')
     ax.imshow(np.transpose(rgb, (1, 0, 2)), origin='lower')
-    ax.set_facecolor('white')
+    ax.set_facecolor('#323232')
     ax.axis('off')
 
     patches = [
