@@ -36,7 +36,8 @@
       "Bash(GIT_DIR=/data2/t113c52027/occ_gt_v2/.git GIT_WORK_TREE=/data2/t113c52027/occ_gt_v2 git log --oneline origin/master -5)",
       "Bash(crontab -l)",
       "Bash(chmod +x /data2/t113c52027/occ_gt_v2/autopush/autopush.sh)",
-      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('lanes:', len\\(d['lane_lines']\\)\\); [print\\(f'  lane track_id={l[\\\\\"track_id\\\\\"]} points={len\\(l[\\\\\"xyz\\\\\"][0]\\)} uv_pts={len\\(l[\\\\\"uv\\\\\"][0]\\)}'\\) for l in d['lane_lines']]\")"
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('lanes:', len\\(d['lane_lines']\\)\\); [print\\(f'  lane track_id={l[\\\\\"track_id\\\\\"]} points={len\\(l[\\\\\"xyz\\\\\"][0]\\)} uv_pts={len\\(l[\\\\\"uv\\\\\"][0]\\)}'\\) for l in d['lane_lines']]\")",
+      "Bash(grep -v '/$')"
     ]
   }
 }
