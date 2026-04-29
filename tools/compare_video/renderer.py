@@ -162,10 +162,17 @@ def render_chase_cam(grid, elev_deg, occ_h, occ_w, voxel_style='flat', z_offset=
 
 def render_bev(grid, size):
     """Top-down BEV of a (200,200,Z) grid, returns square (size x size) image."""
+    # Pass 1: collapse all non-free, non-lane labels (vehicles, road, etc.)
     bev_map = np.ones((grid.shape[0], grid.shape[1]), dtype=np.uint8) * 17
     for z in range(grid.shape[2]):
-        mask = grid[:, :, z] != 17
-        bev_map[mask] = grid[:, :, z][mask]
+        sl = grid[:, :, z]
+        mask = (sl != 17) & (sl != 18)
+        bev_map[mask] = sl[mask]
+    # Pass 2: lane lines only where underlying label is road (11) or free (17)
+    for z in range(grid.shape[2]):
+        sl = grid[:, :, z]
+        lane_mask = (sl == 18) & np.isin(bev_map, [17, 11])
+        bev_map[lane_mask] = 18
 
     bev_rgb = OCC3D_COLORS_BGR[bev_map]
     bev_display = np.transpose(bev_rgb, (1, 0, 2))
