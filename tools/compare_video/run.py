@@ -147,6 +147,10 @@ def main():
     parser.add_argument('--version',  default='v1.0-mini')
 
     # Layout options
+    parser.add_argument('--start_frame', type=str, default=None,
+                        help='First frame id to include (e.g. 000005)')
+    parser.add_argument('--end_frame',   type=str, default=None,
+                        help='Last frame id to include (e.g. 000060)')
     parser.add_argument('--fps',       type=int,   default=10)
     parser.add_argument('--elev',      type=float, default=28)
     parser.add_argument('--total_w',   type=int,   default=1920)
@@ -187,6 +191,10 @@ def main():
     if not frame_ids:
         print(f"ERROR: no labels.npz found in {first_dir}")
         return
+    if args.start_frame:
+        frame_ids = [f for f in frame_ids if f >= args.start_frame]
+    if args.end_frame:
+        frame_ids = [f for f in frame_ids if f <= args.end_frame]
     print(f"Found {len(frame_ids)} frames in {first_dir}")
 
     # Auto-detect cam_mode from cam_dir
