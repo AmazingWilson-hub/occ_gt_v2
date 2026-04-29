@@ -231,7 +231,10 @@ def _inject_lane(occ, frame_idx, frames, curr_pose_inv):
         if not np.any(bm):
             continue
         idxs = np.clip(((pts[bm] - min_b) / GT_VOXEL).astype(int), 0, np.array(GT_GRID) - 1)
-        occ[idxs[:, 0], idxs[:, 1], idxs[:, 2]] = LBL_LANE
+        # Fill ground layer + 2 layers above to make lane lines visible in 3D
+        for dz in range(3):
+            iz = np.clip(idxs[:, 2] + dz, 0, GT_GRID[2] - 1)
+            occ[idxs[:, 0], idxs[:, 1], iz] = LBL_LANE
 
 
 # ── SEG worker ──
