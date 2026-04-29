@@ -62,15 +62,21 @@ def _load_gps(gps_dir):
 
 
 def _load_imu_timestamps(imu_dir):
-    """Returns list of timestamps in nanoseconds (converted from seconds)."""
+    """Returns list of timestamps in nanoseconds (converted from seconds).
+    Handles both per-frame txt files and single-file CSV with header."""
     files = sorted(glob.glob(os.path.join(imu_dir, '*.txt')))
     utimes = []
     for f in files:
         with open(f) as fp:
-            line = fp.readline().strip()
-            if line:
-                ts_sec = float(line.split(',')[0])
-                utimes.append(int(ts_sec * 1e9))
+            for line in fp:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ts_sec = float(line.split(',')[0])
+                    utimes.append(int(ts_sec * 1e9))
+                except ValueError:
+                    continue  # skip header lines
     return utimes
 
 
