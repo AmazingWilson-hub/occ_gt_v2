@@ -231,10 +231,11 @@ def _inject_lane(occ, frame_idx, frames, curr_pose_inv):
         if not np.any(bm):
             continue
         idxs = np.clip(((pts[bm] - min_b) / GT_VOXEL).astype(int), 0, np.array(GT_GRID) - 1)
-        # Fill ground layer + 2 layers above to make lane lines visible in 3D
+        # Only overwrite road (11) or free (17) — never overwrite vehicles or other objects
         for dz in range(3):
             iz = np.clip(idxs[:, 2] + dz, 0, GT_GRID[2] - 1)
-            occ[idxs[:, 0], idxs[:, 1], iz] = LBL_LANE
+            can_write = np.isin(occ[idxs[:, 0], idxs[:, 1], iz], [LBL_FREE, LBL_ROAD])
+            occ[idxs[can_write, 0], idxs[can_write, 1], iz[can_write]] = LBL_LANE
 
 
 # ── SEG worker ──
