@@ -92,7 +92,7 @@ def _build_block_offsets(block, shaded=False):
 
 def render_chase_cam(grid, elev_deg, occ_h, occ_w, voxel_style='flat', z_offset=-2.0):
     """3D chase-cam render of a (200,200,Z) occupancy grid."""
-    occupied = (grid != 17) & (grid != 0)
+    occupied = (grid != 17) & (grid != 0) & (grid != 18)  # exclude lane lines from 3D view
     if not np.any(occupied):
         return np.full((occ_h, occ_w, 3), BG_COLOR, dtype=np.uint8)
 
