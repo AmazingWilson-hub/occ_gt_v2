@@ -47,7 +47,7 @@ OCC3D_COLORS_BGR = np.array([
     [ 70, 206, 247],   # 15: manmade
     [152, 251, 152],   # 16: vegetation
     [255, 255, 255],   # 17: free_space (not rendered)
-    [100, 255, 255],   # 18: lane line (light yellow in BGR)
+    [255, 255, 255],   # 18: lane line (white)
 ], dtype=np.uint8)
 
 # ---------------------------------------------------------------------------

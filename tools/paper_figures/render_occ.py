@@ -35,7 +35,7 @@ OCC3D_COLORS = np.array([
     [247, 206,  70],   # 15: manmade
     [152, 251, 152],   # 16: vegetation
     [ 50,  50,  50],   # 17: free  <- dark gray background
-    [255, 255, 100],   # 18: lane line (light yellow)
+    [255, 255, 255],   # 18: lane line (white)
 ], dtype=np.uint8)
 
 CLASS_NAMES = [
