@@ -35,13 +35,14 @@ OCC3D_COLORS = np.array([
     [222, 184, 135],   # 15: manmade
     [  0, 175,   0],   # 16: vegetation
     [255, 255, 255],   # 17: free  <- white background
+    [255,  69,   0],   # 18: lane line (orange-red)
 ], dtype=np.uint8)
 
 CLASS_NAMES = [
     'others', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle',
     'motorcycle', 'pedestrian', 'traffic_cone', 'trailer', 'truck',
     'driveable_surface', 'other_flat', 'sidewalk', 'terrain', 'manmade',
-    'vegetation',
+    'vegetation', 'free', 'lane_line',
 ]
 
 # Grid parameters (nuScenes v3/v4)
