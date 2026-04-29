@@ -57,9 +57,12 @@ def find_scene(scene_name):
 # ---------------------------------------------------------------------------
 
 def load_pose_dict(scene_dir):
-    from kiss_icp_gps import get_pose_dict
+    import kiss_icp_gps
+    # The highway IMU file has a CSV header that kiss_icp_gps can't parse.
+    # IMU is only used for GPS time-matching which is disabled anyway, so skip it.
+    kiss_icp_gps._load_imu_timestamps = lambda imu_dir: []
     print(f'Running KISS-ICP on {scene_dir} ...')
-    return get_pose_dict(scene_dir)
+    return kiss_icp_gps.get_pose_dict(scene_dir)
 
 
 # ---------------------------------------------------------------------------
