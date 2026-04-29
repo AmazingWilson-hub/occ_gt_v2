@@ -1,5 +1,6 @@
 import os
 import glob
+import json
 import pickle
 import numpy as np
 import open3d as o3d
@@ -27,6 +28,7 @@ EGO_BOX_RADIUS = 4.0   # metres — boxes within this XY radius from origin = eg
 LBL_FREE    = 17
 LBL_MANMADE = 15
 LBL_ROAD    = 11
+LBL_LANE    = 18  # new: lane line
 
 G6_COLOR_TABLE = {
     (215, 150, 248): 11,
@@ -169,17 +171,67 @@ _W_BOX_DICT   = None
 _W_NUM_SWEEPS = None
 _W_OUT_DIR    = None
 _W_PRELOADED  = None   # preloaded point clouds list (xyz arrays)
+_W_LANE_DIR   = None   # path to per-frame lane JSON folder (optional)
 
 
-def _worker_init(frames, files, pose_dict, box_dict, num_sweeps, out_dir, preloaded=None):
-    global _W_FRAMES, _W_FILES, _W_POSE_DICT, _W_BOX_DICT, _W_NUM_SWEEPS, _W_OUT_DIR, _W_PRELOADED
+def _worker_init(frames, files, pose_dict, box_dict, num_sweeps, out_dir, preloaded=None, lane_dir=None):
+    global _W_FRAMES, _W_FILES, _W_POSE_DICT, _W_BOX_DICT, _W_NUM_SWEEPS, _W_OUT_DIR, _W_PRELOADED, _W_LANE_DIR
     _W_FRAMES     = frames
     _W_FILES      = files
     _W_POSE_DICT  = pose_dict
     _W_BOX_DICT   = box_dict
     _W_NUM_SWEEPS = num_sweeps
     _W_OUT_DIR    = out_dir
-    _W_PRELOADED  = preloaded  # list of np.ndarray or None
+    _W_PRELOADED  = preloaded
+    _W_LANE_DIR   = lane_dir
+
+
+def _load_lane_pts(json_path):
+    """Load lane points (vehicle frame [x_forward, y_lateral, z]) from JSON."""
+    if not os.path.exists(json_path):
+        return np.zeros((0, 3))
+    with open(json_path) as f:
+        d = json.load(f)
+    pts_list = []
+    if 'lane_lines' in d:  # 0413 format
+        for lane in d['lane_lines']:
+            y = np.array(lane['xyz'][0], dtype=np.float64)
+            x = np.array(lane['xyz'][1], dtype=np.float64)
+            z = np.array(lane['xyz'][2], dtype=np.float64)
+            pts_list.append(np.stack([x, y, z], axis=1))
+    elif 'xyz' in d:       # 0429 format
+        xyz = d['xyz']
+        if xyz[0]:
+            lateral = np.array(xyz[0], dtype=np.float64)
+            forward = np.array(xyz[1], dtype=np.float64)
+            z       = np.array(xyz[2], dtype=np.float64)
+            pts_list.append(np.stack([forward, lateral, z], axis=1))
+    return np.vstack(pts_list) if pts_list else np.zeros((0, 3))
+
+
+def _inject_lane(occ, frame_idx, frames, curr_pose_inv):
+    """Accumulate lane points from ±num_sweeps frames and write LBL_LANE into occ."""
+    if _W_LANE_DIR is None:
+        return
+    min_b = np.array(GT_BOUNDS[:3])
+    max_b = np.array(GT_BOUNDS[3:])
+    pose_dict  = _W_POSE_DICT
+    num_sweeps = _W_NUM_SWEEPS
+    sweep_range = range(max(0, frame_idx - num_sweeps),
+                        min(len(frames), frame_idx + num_sweeps + 1))
+    for j in sweep_range:
+        fid  = frames[j]
+        pts  = _load_lane_pts(os.path.join(_W_LANE_DIR, f'{fid}.json'))
+        if not len(pts):
+            continue
+        if j != frame_idx:
+            p_homo = np.hstack([pts, np.ones((len(pts), 1))])
+            pts = (curr_pose_inv @ pose_dict[fid]['matrix'] @ p_homo.T).T[:, :3]
+        bm = np.all((pts >= min_b) & (pts < max_b), axis=1)
+        if not np.any(bm):
+            continue
+        idxs = np.clip(((pts[bm] - min_b) / GT_VOXEL).astype(int), 0, np.array(GT_GRID) - 1)
+        occ[idxs[:, 0], idxs[:, 1], idxs[:, 2]] = LBL_LANE
 
 
 # ── SEG worker ──
@@ -273,6 +325,8 @@ def _seg_worker(i):
         _non_ego = np.hypot(_boxes[:, 0], _boxes[:, 1]) > EGO_BOX_RADIUS
         occ, filled = fill_box_interior(occ, _boxes[_non_ego], _names[_non_ego], GT_BOUNDS, GT_VOXEL, GT_GRID)
 
+    _inject_lane(occ, i, frames, curr_pose_inv)
+
     save_path = os.path.join(out_dir, frame_id)
     os.makedirs(save_path, exist_ok=True)
     np.savez_compressed(os.path.join(save_path, 'labels.npz'), semantics=occ)
@@ -339,6 +393,8 @@ def _raw_worker(i):
         _names = curr_boxes['names']
         _non_ego = np.hypot(_boxes[:, 0], _boxes[:, 1]) > EGO_BOX_RADIUS
         occ, filled = fill_box_interior(occ, _boxes[_non_ego], _names[_non_ego], GT_BOUNDS, GT_VOXEL, GT_GRID)
+
+    _inject_lane(occ, i, frames, curr_pose_inv)
 
     save_path = os.path.join(out_dir, frame_id)
     os.makedirs(save_path, exist_ok=True)
@@ -412,6 +468,8 @@ def _heuristic_worker(i):
         _non_ego = np.hypot(_boxes[:, 0], _boxes[:, 1]) > EGO_BOX_RADIUS
         occ, filled = fill_box_interior(occ, _boxes[_non_ego], _names[_non_ego], GT_BOUNDS, GT_VOXEL, GT_GRID)
 
+    _inject_lane(occ, i, frames, curr_pose_inv)
+
     save_path = os.path.join(out_dir, frame_id)
     os.makedirs(save_path, exist_ok=True)
     np.savez_compressed(os.path.join(save_path, 'labels.npz'), semantics=occ)
@@ -423,7 +481,7 @@ def _heuristic_worker(i):
 # Public generate functions
 # ─────────────────────────────────────────────
 
-def _run_pool(worker_fn, init_args, n_frames, num_workers, desc, preload_pcd=False):
+def _run_pool(worker_fn, init_args, n_frames, num_workers, desc, preload_pcd=False, lane_dir=None):
     frames, files, pose_dict, box_dict, num_sweeps, out_dir = init_args
 
     preloaded = None
@@ -437,7 +495,7 @@ def _run_pool(worker_fn, init_args, n_frames, num_workers, desc, preload_pcd=Fal
     with ctx.Pool(
         processes=num_workers,
         initializer=_worker_init,
-        initargs=(frames, files, pose_dict, box_dict, num_sweeps, out_dir, preloaded),
+        initargs=(frames, files, pose_dict, box_dict, num_sweeps, out_dir, preloaded, lane_dir),
     ) as pool:
         print(f"  Workers ready, submitting {n_frames} tasks...", flush=True)
         results = list(tqdm(pool.imap(worker_fn, range(n_frames)), total=n_frames, desc=desc))
@@ -451,7 +509,7 @@ def _get_pcd_dir(dataroot):
     return d
 
 
-def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None):
+def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None, lane_dir=None):
     pcd_files = sorted(glob.glob(os.path.join(_get_pcd_dir(dataroot), '*.pcd')))
     for _sem_candidate in ['result_depth_filtered_v2', 'result_depth_filtered', 'colored_360_pcd_filter']:
         _sem_dir = os.path.join(dataroot, _sem_candidate)
@@ -482,11 +540,11 @@ def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output', num
         frames = [frames[i] for i in idx]
         sem_files = [sem_files[i] for i in idx]
     os.makedirs(out_dir, exist_ok=True)
-    total = _run_pool(_seg_worker, (frames, sem_files, pose_dict, box_dict, num_sweeps, out_dir), len(frames), num_workers, 'SEG')
+    total = _run_pool(_seg_worker, (frames, sem_files, pose_dict, box_dict, num_sweeps, out_dir), len(frames), num_workers, 'SEG', lane_dir=lane_dir)
     print(f"\n[SEG Complete] {total} dynamic voxels filled by 3D Box")
 
 
-def generate_occupancy_raw(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None):
+def generate_occupancy_raw(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None, lane_dir=None):
     pcd_files = sorted(glob.glob(os.path.join(_get_pcd_dir(dataroot), '*.pcd')))
     print(f"[INFO] RAW 模式：{len(pcd_files)} 幀，workers={num_workers}")
 
@@ -509,11 +567,11 @@ def generate_occupancy_raw(dataroot, pose_dict, num_sweeps=40, out_dir='output',
         frames = [frames[i] for i in idx]
         pcd_files = [pcd_files[i] for i in idx]
     os.makedirs(out_dir, exist_ok=True)
-    total = _run_pool(_raw_worker, (frames, pcd_files, pose_dict, box_dict, num_sweeps, out_dir), len(frames), num_workers, 'RAW', preload_pcd=True)
+    total = _run_pool(_raw_worker, (frames, pcd_files, pose_dict, box_dict, num_sweeps, out_dir), len(frames), num_workers, 'RAW', preload_pcd=True, lane_dir=lane_dir)
     print(f"\n[RAW Complete] {total} dynamic voxels filled by 3D Box")
 
 
-def generate_occupancy_heuristic(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None):
+def generate_occupancy_heuristic(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None, lane_dir=None):
     pcd_files = sorted(glob.glob(os.path.join(_get_pcd_dir(dataroot), '*.pcd')))
     print(f"[INFO] HEURISTIC 模式：{len(pcd_files)} 幀，workers={num_workers}")
 
@@ -536,7 +594,7 @@ def generate_occupancy_heuristic(dataroot, pose_dict, num_sweeps=40, out_dir='ou
         frames = [frames[i] for i in idx]
         pcd_files = [pcd_files[i] for i in idx]
     os.makedirs(out_dir, exist_ok=True)
-    total = _run_pool(_heuristic_worker, (frames, pcd_files, pose_dict, box_dict, num_sweeps, out_dir), len(frames), num_workers, 'HEURISTIC', preload_pcd=True)
+    total = _run_pool(_heuristic_worker, (frames, pcd_files, pose_dict, box_dict, num_sweeps, out_dir), len(frames), num_workers, 'HEURISTIC', preload_pcd=True, lane_dir=lane_dir)
     print(f"\n[HEURISTIC Complete] {total} dynamic voxels filled by 3D Box")
 
 
@@ -552,6 +610,8 @@ def main():
     parser.add_argument('--num_workers', type=int, default=16)
     parser.add_argument('--frame',       type=str, default=None,
                         help='Only process this single frame id (e.g. 000044)')
+    parser.add_argument('--lane_dir',    type=str, default=None,
+                        help='Path to folder with per-frame lane JSON files (optional)')
     args = parser.parse_args()
 
     scene_path = os.path.join(args.data_root, args.scene)
@@ -580,17 +640,20 @@ def main():
     if args.mode in ('semantic', 'all'):
         generate_occupancy(scene_path, pose_dict, args.sweeps,
                            out_dir=os.path.join(scene_out, 'seg'),
-                           num_workers=args.num_workers, only_frame=args.frame)
+                           num_workers=args.num_workers, only_frame=args.frame,
+                           lane_dir=args.lane_dir)
 
     if args.mode in ('raw', 'all'):
         generate_occupancy_raw(scene_path, pose_dict, args.sweeps,
                                out_dir=os.path.join(scene_out, 'raw'),
-                               num_workers=args.num_workers, only_frame=args.frame)
+                               num_workers=args.num_workers, only_frame=args.frame,
+                               lane_dir=args.lane_dir)
 
     if args.mode in ('heuristic', 'all'):
         generate_occupancy_heuristic(scene_path, pose_dict, args.sweeps,
                                      out_dir=os.path.join(scene_out, 'heuristic'),
-                                     num_workers=args.num_workers, only_frame=args.frame)
+                                     num_workers=args.num_workers, only_frame=args.frame,
+                                     lane_dir=args.lane_dir)
 
 
 if __name__ == '__main__':
