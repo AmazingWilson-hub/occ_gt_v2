@@ -33,7 +33,9 @@ sys.path.insert(0, G6_POSE_DIR)
 # ---------------------------------------------------------------------------
 
 def find_scene(scene_name):
-    """Return (scene_dir, lane_dir, lidar_dir, batch) or raise."""
+    """Return (pose_dir, lane_dir, lidar_dir, batch) or raise.
+    pose_dir: directory passed to KISS-ICP (must contain VLS128_pcd + optionally gps/)
+    """
     for batch in sorted(os.listdir(os.path.join(DATA_ROOT, 'roadlane'))):
         candidate = os.path.join(DATA_ROOT, 'roadlane', batch, scene_name)
         if os.path.isdir(candidate):
@@ -43,9 +45,10 @@ def find_scene(scene_name):
             if os.path.isdir(lidar_inside) and os.path.isdir(lane_inside):
                 return candidate, lane_inside, lidar_inside, batch
             # 0413 style: LiDAR lives in g6/
-            lidar_g6 = os.path.join(DATA_ROOT, 'g6', scene_name, 'VLS128_pcd')
+            g6_scene = os.path.join(DATA_ROOT, 'g6', scene_name)
+            lidar_g6 = os.path.join(g6_scene, 'VLS128_pcd')
             if os.path.isdir(lidar_g6):
-                return candidate, candidate, lidar_g6, batch
+                return g6_scene, candidate, lidar_g6, batch
     raise FileNotFoundError(f'Scene not found: {scene_name}')
 
 
@@ -154,6 +157,10 @@ def accumulate(scene_name, out_dir, lidar_voxel=0.2):
     lane_ids  = np.array(lane_ids_list)
 
     print(f'LiDAR: {len(lidar_pts):,} pts  |  Lane: {len(lane_pts):,} pts')
+
+    if not len(lane_pts):
+        print('WARNING: No lane points found. Check that lane JSON files exist and are non-empty.')
+        return
 
     os.makedirs(out_dir, exist_ok=True)
     _save_combined_ply(lidar_pts, lane_pts, lane_ids, lidar_voxel,
