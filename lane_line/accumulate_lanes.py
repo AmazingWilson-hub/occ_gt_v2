@@ -90,7 +90,8 @@ def load_frame_lanes_0413(json_path):
 def load_frame_lanes_0429(json_path):
     """
     0429 format: flat xyz, no per-lane grouping, track_id = 0.
-    JSON xyz order: [x_lateral, y_forward, z_height].
+    JSON xyz order: [lateral, forward, z] — same convention as 0413.
+    Convert to LiDAR frame [x_forward, y_lateral, z].
     Returns list of (track_id, Nx3 array).
     """
     with open(json_path) as f:
@@ -98,10 +99,10 @@ def load_frame_lanes_0429(json_path):
     xyz = d.get('xyz', [[], [], []])
     if not xyz[0]:
         return []
-    x_vals = np.array(xyz[0], dtype=np.float64)
-    y_vals = np.array(xyz[1], dtype=np.float64)
-    z_vals = np.array(xyz[2], dtype=np.float64)
-    pts = np.stack([x_vals, y_vals, z_vals], axis=1)
+    lateral = np.array(xyz[0], dtype=np.float64)
+    forward = np.array(xyz[1], dtype=np.float64)
+    z_vals  = np.array(xyz[2], dtype=np.float64)
+    pts = np.stack([forward, lateral, z_vals], axis=1)  # [x_forward, y_lateral, z]
     return [(0, pts)]
 
 
