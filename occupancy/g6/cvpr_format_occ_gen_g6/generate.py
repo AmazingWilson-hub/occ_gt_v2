@@ -512,13 +512,18 @@ def _get_pcd_dir(dataroot):
     return d
 
 
-def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None, lane_dir=None):
+def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output', num_workers=16, only_frame=None, lane_dir=None, sem_subdir=None):
     pcd_files = sorted(glob.glob(os.path.join(_get_pcd_dir(dataroot), '*.pcd')))
-    for _sem_candidate in ['result_depth_filtered_v2', 'result_depth_filtered', 'colored_360_pcd_filter']:
-        _sem_dir = os.path.join(dataroot, _sem_candidate)
-        if os.path.isdir(_sem_dir):
-            sem_dir = _sem_dir
-            break
+    if sem_subdir:
+        sem_dir = os.path.join(dataroot, sem_subdir)
+    else:
+        for _sem_candidate in ['result_depth_filtered_v2', 'result_depth_filtered', 'colored_360_pcd_filter',
+                               'colored_pcd_6view', 'colored_pcd_main']:
+            _sem_dir = os.path.join(dataroot, _sem_candidate)
+            if os.path.isdir(_sem_dir):
+                sem_dir = _sem_dir
+                break
+    print(f"[INFO] SEG 語意來源：{sem_dir}")
     sem_files = sorted(glob.glob(os.path.join(sem_dir, '*.pcd')))
     n = min(len(pcd_files), len(sem_files))
     sem_files = sem_files[:n]
@@ -615,6 +620,10 @@ def main():
                         help='Only process this single frame id (e.g. 000044)')
     parser.add_argument('--lane_dir',    type=str, default=None,
                         help='Path to folder with per-frame lane JSON files (optional)')
+    parser.add_argument('--sem_subdir',  type=str, default=None,
+                        help='Semantic PCD subfolder name (e.g. colored_pcd_main, colored_pcd_6view)')
+    parser.add_argument('--out_subdir',  type=str, default=None,
+                        help='Override output subdirectory name for semantic mode (e.g. seg_main, seg_360)')
     args = parser.parse_args()
 
     scene_path = os.path.join(args.data_root, args.scene)
@@ -641,10 +650,11 @@ def main():
     scene_out = os.path.join(args.out_root, args.scene)
 
     if args.mode in ('semantic', 'all'):
+        seg_subdir = args.out_subdir if args.out_subdir else 'seg'
         generate_occupancy(scene_path, pose_dict, args.sweeps,
-                           out_dir=os.path.join(scene_out, 'seg'),
+                           out_dir=os.path.join(scene_out, seg_subdir),
                            num_workers=args.num_workers, only_frame=args.frame,
-                           lane_dir=args.lane_dir)
+                           lane_dir=args.lane_dir, sem_subdir=args.sem_subdir)
 
     if args.mode in ('raw', 'all'):
         generate_occupancy_raw(scene_path, pose_dict, args.sweeps,
