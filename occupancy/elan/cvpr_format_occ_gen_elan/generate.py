@@ -1,5 +1,6 @@
 import os
 import glob
+import json
 import pickle
 import numpy as np
 import open3d as o3d
@@ -16,11 +17,12 @@ GT_VOXEL  = 0.4
 GT_GRID   = (200, 200, 21)  # Z 從 -3.0 到 5.4 → 8.4m / 0.4 = 21 layers
 
 # Labels
-LBL_FREE = 17
-LBL_MANMADE = 15
-LBL_ROAD = 11
+LBL_FREE     = 17
+LBL_MANMADE  = 15
+LBL_ROAD     = 11
 LBL_SIDEWALK = 13
-LBL_TERRAIN = 14
+LBL_TERRAIN  = 14
+LBL_LANE     = 18  # new: lane line
 
 # --- ELAN Semantic Color Table → Occ3D Label ---
 # RGB (0-255) → Occ3D label
@@ -41,6 +43,63 @@ ELAN_COLOR_TABLE = {
 _ELAN_PALETTE = np.array(list(ELAN_COLOR_TABLE.keys()), dtype=np.float32)  # (K, 3)
 _ELAN_LABELS  = np.array(list(ELAN_COLOR_TABLE.values()), dtype=np.uint8)  # (K,)
 
+def _load_lane_pts(json_path):
+    """
+    Load lane points from a JSON file (vehicle frame, [x_forward, y_lateral, z]).
+    Supports both 0413 format (lane_lines list) and 0429 format (flat xyz).
+    Returns Nx3 array or empty array.
+    """
+    if not os.path.exists(json_path):
+        return np.zeros((0, 3))
+    with open(json_path) as f:
+        d = json.load(f)
+    pts_list = []
+    if 'lane_lines' in d:  # 0413 format
+        for lane in d['lane_lines']:
+            y = np.array(lane['xyz'][0], dtype=np.float64)
+            x = np.array(lane['xyz'][1], dtype=np.float64)
+            z = np.array(lane['xyz'][2], dtype=np.float64)
+            pts_list.append(np.stack([x, y, z], axis=1))
+    elif 'xyz' in d:       # 0429 format
+        xyz = d['xyz']
+        if xyz[0]:
+            lateral = np.array(xyz[0], dtype=np.float64)
+            forward = np.array(xyz[1], dtype=np.float64)
+            z       = np.array(xyz[2], dtype=np.float64)
+            pts_list.append(np.stack([forward, lateral, z], axis=1))
+    return np.vstack(pts_list) if pts_list else np.zeros((0, 3))
+
+
+def inject_lane_sweeps(occ, frame_idx, frames, lane_dir, pose_dict, curr_pose_inv, num_sweeps):
+    """
+    Accumulate lane points from ±num_sweeps frames, transform to current vehicle frame,
+    and write LBL_LANE into the occupancy grid.
+    """
+    if lane_dir is None:
+        return
+
+    min_b = np.array(GT_BOUNDS[:3])
+    max_b = np.array(GT_BOUNDS[3:])
+
+    sweep_range = range(max(0, frame_idx - num_sweeps),
+                        min(len(frames), frame_idx + num_sweeps + 1))
+    for j in sweep_range:
+        fid = frames[j]
+        json_path = os.path.join(lane_dir, f'{fid}.json')
+        pts = _load_lane_pts(json_path)
+        if not len(pts):
+            continue
+        if j != frame_idx:
+            other_pose = pose_dict[fid]['matrix']
+            p_homo = np.hstack([pts, np.ones((len(pts), 1))])
+            pts = (curr_pose_inv @ other_pose @ p_homo.T).T[:, :3]
+        bm = np.all((pts >= min_b) & (pts < max_b), axis=1)
+        if not np.any(bm):
+            continue
+        idxs = np.clip(((pts[bm] - min_b) / GT_VOXEL).astype(int), 0, np.array(GT_GRID) - 1)
+        occ[idxs[:, 0], idxs[:, 1], idxs[:, 2]] = LBL_LANE
+
+
 def rgb_to_occ3d_label(colors_float):
     """
     Map Nx3 float RGB [0,1] to Occ3D labels via nearest-neighbor to the ELAN palette.
@@ -58,7 +117,7 @@ def load_pkl(path):
     with open(path, 'rb') as f:
         return pickle.load(f)
 
-def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output'):
+def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output', lane_dir=None):
     pcd_files = sorted(glob.glob(os.path.join(dataroot, 'VLS128_pcdnpy', '*.pcd')))
     sem_files = sorted(glob.glob(os.path.join(dataroot, 'colored_pcd_img', '*.pcd')))
     has_semantic = len(sem_files) == len(pcd_files)
@@ -181,14 +240,17 @@ def generate_occupancy(dataroot, pose_dict, num_sweeps=40, out_dir='output'):
         if len(curr_boxes['names']) > 0:
             occ, filled = fill_box_interior(occ, curr_boxes['boxes_lidar'], curr_boxes['names'], GT_BOUNDS, GT_VOXEL, GT_GRID)
             total_filled += filled
-            
+
+        # ====== Lane Line 注入 ======
+        inject_lane_sweeps(occ, i, frames, lane_dir, pose_dict, curr_pose_inv, num_sweeps)
+
         save_path = os.path.join(out_dir, frame_id)
         os.makedirs(save_path, exist_ok=True)
         np.savez_compressed(os.path.join(save_path, 'labels.npz'), semantics=occ)
-        
+
     print(f"\n[V3 Custom Pipeline Complete] 總共有 {total_filled} 個動態物件 Voxel 被 3D Box 霸道填滿實心色彩！")
 
-def generate_occupancy_raw(dataroot, pose_dict, num_sweeps=40, out_dir='output'):
+def generate_occupancy_raw(dataroot, pose_dict, num_sweeps=40, out_dir='output', lane_dir=None):
     """純 360° 原始 LiDAR 堆疊版 (無語意)，動態物件用 3D Box 填充"""
     pcd_files = sorted(glob.glob(os.path.join(dataroot, 'VLS128_pcdnpy', '*.pcd')))
     print(f"[INFO] RAW 模式：360° LiDAR 堆疊 + 3D Box 填充 (無語意)")
@@ -266,14 +328,17 @@ def generate_occupancy_raw(dataroot, pose_dict, num_sweeps=40, out_dir='output')
         if len(curr_boxes['names']) > 0:
             occ, filled = fill_box_interior(occ, curr_boxes['boxes_lidar'], curr_boxes['names'], GT_BOUNDS, GT_VOXEL, GT_GRID)
             total_filled += filled
-        
+
+        # ====== Lane Line 注入 ======
+        inject_lane_sweeps(occ, i, frames, lane_dir, pose_dict, curr_pose_inv, num_sweeps)
+
         save_path = os.path.join(out_dir, frame_id)
         os.makedirs(save_path, exist_ok=True)
         np.savez_compressed(os.path.join(save_path, 'labels.npz'), semantics=occ)
-    
+
     print(f"\n[RAW Pipeline Complete] 總共有 {total_filled} 個動態物件 Voxel 被 3D Box 霸道填滿！")
 
-def generate_occupancy_heuristic(dataroot, pose_dict, num_sweeps=40, out_dir='output'):
+def generate_occupancy_heuristic(dataroot, pose_dict, num_sweeps=40, out_dir='output', lane_dir=None):
     """360° 原始 LiDAR 堆疊 + 高度啟發式判斷道路 vs 建築，動態物件用 3D Box 填充"""
     pcd_files = sorted(glob.glob(os.path.join(dataroot, 'VLS128_pcdnpy', '*.pcd')))
     print(f"[INFO] HEURISTIC 模式：360° LiDAR 堆疊 + 高度判斷道路 + 3D Box 填充")
@@ -353,11 +418,14 @@ def generate_occupancy_heuristic(dataroot, pose_dict, num_sweeps=40, out_dir='ou
         if len(curr_boxes['names']) > 0:
             occ, filled = fill_box_interior(occ, curr_boxes['boxes_lidar'], curr_boxes['names'], GT_BOUNDS, GT_VOXEL, GT_GRID)
             total_filled += filled
-        
+
+        # ====== Lane Line 注入 ======
+        inject_lane_sweeps(occ, i, frames, lane_dir, pose_dict, curr_pose_inv, num_sweeps)
+
         save_path = os.path.join(out_dir, frame_id)
         os.makedirs(save_path, exist_ok=True)
         np.savez_compressed(os.path.join(save_path, 'labels.npz'), semantics=occ)
-    
+
     print(f"\n[HEURISTIC Pipeline Complete] 總共有 {total_filled} 個動態物件 Voxel 被 3D Box 霸道填滿！")
 
 def main():
@@ -369,6 +437,8 @@ def main():
                         help='semantic=語意點雲, raw=純原始, heuristic=高度判斷, all=三種都跑')
     parser.add_argument('--data_root', default='/home/t113c52027/t113c52027/occ_gt_v2/data/elan')
     parser.add_argument('--out_root', default=os.path.join(os.path.dirname(__file__), 'output'))
+    parser.add_argument('--lane_dir', default=None,
+                        help='Path to folder with per-frame lane JSON files (optional)')
     args = parser.parse_args()
 
     scene_path = os.path.join(args.data_root, args.scene)
@@ -381,15 +451,15 @@ def main():
     
     if args.mode in ('semantic', 'all'):
         out_dir = os.path.join(scene_out, 'seg')
-        generate_occupancy(scene_path, pose_dict, args.sweeps, out_dir=out_dir)
-    
+        generate_occupancy(scene_path, pose_dict, args.sweeps, out_dir=out_dir, lane_dir=args.lane_dir)
+
     if args.mode in ('raw', 'all'):
         out_dir_raw = os.path.join(scene_out, 'raw')
-        generate_occupancy_raw(scene_path, pose_dict, args.sweeps, out_dir=out_dir_raw)
-    
+        generate_occupancy_raw(scene_path, pose_dict, args.sweeps, out_dir=out_dir_raw, lane_dir=args.lane_dir)
+
     if args.mode in ('heuristic', 'all'):
         out_dir_heur = os.path.join(scene_out, 'heuristic')
-        generate_occupancy_heuristic(scene_path, pose_dict, args.sweeps, out_dir=out_dir_heur)
+        generate_occupancy_heuristic(scene_path, pose_dict, args.sweeps, out_dir=out_dir_heur, lane_dir=args.lane_dir)
 
 if __name__ == '__main__':
     main()
