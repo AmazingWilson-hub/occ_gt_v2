@@ -49,7 +49,7 @@ import sys
 import argparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from tools.compare_video.renderer import render_comparison_video
+from tools.compare_video.renderer import render_comparison_video, render_three_view_video
 
 # U5 six-camera directory mapping
 U5_CAM_DIRS = {
@@ -170,6 +170,16 @@ def main():
     parser.add_argument('--pose_pkl',  default=None,
                         help='Path to pose_dict.pkl for lane world→ego projection')
 
+    # Three-view layout (Main 3D | 360 BEV | FSD)
+    parser.add_argument('--three_view', action='store_true',
+                        help='Use Main/360/FSD layout instead of side-by-side comparison')
+    parser.add_argument('--box_pkl',   default=None,
+                        help='Path to 3dbox_result.pkl for FSD panel boxes')
+    parser.add_argument('--score_thresh', type=float, default=0.4,
+                        help='Score threshold for 3D box detections (FSD panel)')
+    parser.add_argument('--fsd_elev',  type=float, default=14.0,
+                        help='Camera elevation angle (deg) for FSD panel')
+
     args = parser.parse_args()
 
     if len(args.dirs) != len(args.labels):
@@ -276,6 +286,7 @@ def main():
         z_offset = -2.0   # default (U5/ELAN grid_z=20)
 
     # Load fitted lane lines (optional, independent of occupancy)
+    import numpy as np
     lane_pts_world = None
     pose_dict_lane = None
     if args.lane_json and os.path.exists(args.lane_json):
@@ -290,6 +301,37 @@ def main():
             with open(args.pose_pkl, 'rb') as f:
                 pose_dict_lane = pickle.load(f)
             print(f'Loaded pose_dict ({len(pose_dict_lane)} frames) from {args.pose_pkl}')
+
+    # Three-view layout: Main 3D | 360 BEV | FSD
+    if args.three_view:
+        box_by_frame = None
+        if args.box_pkl and os.path.exists(args.box_pkl):
+            import pickle
+            with open(args.box_pkl, 'rb') as f:
+                box_data = pickle.load(f)
+            box_by_frame = {str(int(b['frame_id'])): b for b in box_data}
+            print(f'Loaded {len(box_by_frame)} box frames from {args.box_pkl}')
+
+        render_three_view_video(
+            frame_ids      = frame_ids,
+            occ_dir        = args.dirs[0],
+            get_cameras    = get_cameras,
+            out_path       = args.out,
+            box_by_frame   = box_by_frame,
+            score_thresh   = args.score_thresh,
+            lane_pts_world = lane_pts_world,
+            pose_dict      = pose_dict_lane,
+            fps            = args.fps,
+            elev           = args.elev,
+            fsd_elev       = args.fsd_elev,
+            total_w        = args.total_w,
+            total_h        = args.total_h,
+            cam_h          = args.cam_h,
+            grid_shape     = grid_shape,
+            voxel_style    = args.voxel_style,
+            z_offset       = z_offset,
+        )
+        return
 
     render_comparison_video(
         frame_ids      = frame_ids,

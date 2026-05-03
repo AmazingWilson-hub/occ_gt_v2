@@ -160,6 +160,141 @@ def render_chase_cam(grid, elev_deg, occ_h, occ_w, voxel_style='flat', z_offset=
     return canvas
 
 
+# ---------------------------------------------------------------------------
+# FSD-style 3D perspective view
+# ---------------------------------------------------------------------------
+FSD_BG_SKY     = np.array([12, 10,  8], dtype=np.float32)
+FSD_BG_FAR     = np.array([32, 36, 40], dtype=np.float32)
+FSD_BG_NEAR    = np.array([42, 46, 50], dtype=np.float32)
+FSD_ROAD_COLOR = (30, 35, 40)
+FSD_LANE_COLOR = (80, 220, 255)
+FSD_BOX_COLOR  = (200, 210, 220)
+FSD_EDGE_COLOR = (255, 255, 255)
+FSD_EGO_COLOR      = (200, 150,   0)
+FSD_EGO_EDGE_COLOR = (255, 220, 50)
+FSD_EGO_BOX        = np.array([2.5, 0.0, 0.8, 4.5, 2.0, 1.6, 0.0])
+
+_FSD_BOX_EDGES = [(0,1),(2,3),(4,5),(6,7),
+                  (0,2),(1,3),(4,6),(5,7),
+                  (0,4),(1,5),(2,6),(3,7)]
+_FSD_BOX_BOTTOM = [0,2,3,1]
+
+
+def _fsd_fill_bg(canvas):
+    h, w = canvas.shape[:2]
+    horizon_y = int(h * 0.22)
+    ys = np.arange(h, dtype=np.float32)
+    t_above = np.clip(ys / max(1, horizon_y), 0, 1)
+    t_below = np.clip((ys - horizon_y) / max(1, h - horizon_y), 0, 1)
+    above = ys < horizon_y
+    colors = np.where(above[:, None],
+                      FSD_BG_SKY[None] * (1 - t_above[:, None]) + FSD_BG_FAR[None] * t_above[:, None],
+                      FSD_BG_FAR[None] * (1 - t_below[:, None]) + FSD_BG_NEAR[None] * t_below[:, None]
+                      ).astype(np.uint8)
+    canvas[:] = colors[:, None, :]
+
+
+def _fsd_make_proj(elev_deg, w, h, fov_deg=65.0, cam_height=8.0, cam_back=18.0):
+    el = np.radians(elev_deg)
+    se, ce = np.sin(el), np.cos(el)
+    f = (w / 2.0) / np.tan(np.radians(fov_deg) / 2.0)
+    cx = w // 2
+    cy = int(h * 0.78)
+
+    def proj(pts):
+        px = pts[:, 0] + cam_back
+        py = pts[:, 1]
+        pz = pts[:, 2] - cam_height
+        x_cam = -py
+        y_cam = -se * px - ce * pz
+        z_cam =  ce * px - se * pz
+        z_cam = np.maximum(z_cam, 0.5)
+        sx = (f * x_cam / z_cam + cx).astype(np.int32)
+        sy = (f * y_cam / z_cam + cy).astype(np.int32)
+        return np.stack([sx, sy], axis=1), z_cam
+
+    return proj
+
+
+def _fsd_box_corners(box):
+    cx, cy, cz, dx, dy, dz, h = box
+    c, s = np.cos(h), np.sin(h)
+    R = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+    offsets = np.array([[ 1, 1, 1], [ 1, 1,-1], [ 1,-1, 1], [ 1,-1,-1],
+                        [-1, 1, 1], [-1, 1,-1], [-1,-1, 1], [-1,-1,-1]],
+                       dtype=np.float64) * np.array([dx/2, dy/2, dz/2])
+    return (R @ offsets.T).T + np.array([cx, cy, cz])
+
+
+def _fsd_draw_road(canvas, proj, view_range, back_range, road_width):
+    hw = road_width / 2
+    corners = np.array([[ view_range, -hw, 0],
+                        [ view_range,  hw, 0],
+                        [-back_range,  hw, 0],
+                        [-back_range, -hw, 0]])
+    pts_2d, _ = proj(corners)
+    overlay = canvas.copy()
+    cv2.fillPoly(overlay, [pts_2d.reshape(-1, 1, 2)], FSD_ROAD_COLOR)
+    cv2.addWeighted(overlay, 0.55, canvas, 0.45, 0, canvas)
+
+
+def _fsd_draw_lane(canvas, proj, pts_ego, view_range, back_range, thickness=3):
+    mask = ((pts_ego[:, 0] >= -back_range) & (pts_ego[:, 0] <= view_range) &
+            (np.abs(pts_ego[:, 1]) <= view_range))
+    pts_ego = pts_ego[mask]
+    if len(pts_ego) < 2:
+        return
+    order = np.argsort(pts_ego[:, 0])
+    pts_ego = pts_ego[order]
+    scr, _ = proj(pts_ego)
+    cv2.polylines(canvas, [scr.reshape(-1, 1, 2)], False, FSD_LANE_COLOR,
+                  thickness=thickness, lineType=cv2.LINE_AA)
+
+
+def _fsd_draw_box(canvas, proj, box, fill_color, edge_color, thickness=2):
+    corners = _fsd_box_corners(box)
+    scr, _ = proj(corners)
+    bottom = scr[_FSD_BOX_BOTTOM]
+    overlay = canvas.copy()
+    cv2.fillPoly(overlay, [bottom.reshape(-1, 1, 2)], fill_color)
+    cv2.addWeighted(overlay, 0.4, canvas, 0.6, 0, canvas)
+    for i, j in _FSD_BOX_EDGES:
+        cv2.line(canvas, tuple(scr[i]), tuple(scr[j]),
+                 edge_color, thickness, cv2.LINE_AA)
+
+
+def _filter_ego_self_detection(boxes):
+    """Drop boxes whose centre lies inside ego footprint."""
+    if boxes is None or not len(boxes):
+        return boxes
+    cx, cy = boxes[:, 0], boxes[:, 1]
+    keep = ~((cx > -1.0) & (cx < 5.5) & (np.abs(cy) < 1.5))
+    return boxes[keep]
+
+
+def render_fsd_view(panel_w, panel_h, lane_pts_ego_list, boxes_ego,
+                    elev_deg=14.0, view_range=80.0, back_range=5.0, road_width=28.0):
+    """Tesla FSD-style 3D perspective panel.
+
+    lane_pts_ego_list : list of Nx3 arrays already in ego frame
+    boxes_ego         : Nx>=7 array of [x,y,z,dx,dy,dz,heading,...] in ego frame, or None
+                        Ego self-detection is filtered out automatically.
+    """
+    canvas = np.zeros((panel_h, panel_w, 3), dtype=np.uint8)
+    _fsd_fill_bg(canvas)
+    proj = _fsd_make_proj(elev_deg, panel_w, panel_h)
+    _fsd_draw_road(canvas, proj, view_range, back_range, road_width)
+    for lane in lane_pts_ego_list:
+        _fsd_draw_lane(canvas, proj, lane, view_range, back_range)
+    boxes_ego = _filter_ego_self_detection(boxes_ego)
+    if boxes_ego is not None and len(boxes_ego):
+        for b in boxes_ego:
+            _fsd_draw_box(canvas, proj, b[:7], FSD_BOX_COLOR, FSD_EDGE_COLOR)
+    # Always draw ego (own-vehicle visualization, drawn last so it's on top)
+    _fsd_draw_box(canvas, proj, FSD_EGO_BOX, FSD_EGO_COLOR, FSD_EGO_EDGE_COLOR)
+    return canvas
+
+
 def render_bev(grid, size):
     """Top-down BEV of a (200,200,Z) grid, returns square (size x size) image."""
     # Pass 1: collapse all non-free, non-lane labels (vehicles, road, etc.)
@@ -383,6 +518,122 @@ def render_comparison_video(
         bev_col[y_off:y_off + bev_size, :bev_size] = bev_img
         cv2.line(bev_col, (0, 0), (0, total_h), (80, 80, 80), 2)
         canvas[:, main_w:] = bev_col
+
+        writer.write(canvas)
+
+    writer.release()
+    print(f"Saved: {out_path}")
+
+
+# ---------------------------------------------------------------------------
+# Three-view layout: top = camera strip, bottom = [Main 3D | 360 BEV | FSD]
+# ---------------------------------------------------------------------------
+
+def render_three_view_video(
+    frame_ids,
+    occ_dir,
+    get_cameras,
+    out_path,
+    box_by_frame=None,
+    score_thresh=0.4,
+    lane_pts_world=None,
+    pose_dict=None,
+    fps=10,
+    elev=28,
+    fsd_elev=14.0,
+    total_w=1920,
+    total_h=1080,
+    cam_h=500,
+    bar_h=36,
+    grid_shape=(200, 200, 20),
+    voxel_style='flat',
+    z_offset=-2.0,
+):
+    panel_w   = total_w // 3
+    occ_h     = total_h - cam_h
+    content_h = occ_h - bar_h
+    cam_strip_w = panel_w * 3   # may be slightly less than total_w due to int div
+
+    os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(out_path, fourcc, fps, (total_w, total_h))
+    if not writer.isOpened():
+        raise RuntimeError(f"VideoWriter failed to open: {out_path}")
+
+    print(f"Three-view canvas {total_w}x{total_h} | cam_h={cam_h} "
+          f"panels=3 x {panel_w}x{content_h}")
+
+    labels = ['Main', '360 BEV', 'FSD']
+
+    for frame_id in tqdm(frame_ids, desc='Rendering'):
+        canvas = np.zeros((total_h, total_w, 3), dtype=np.uint8)
+
+        # Camera strip
+        cam_paths = get_cameras(frame_id) or {}
+        cam_strip = _render_cam_strip(cam_paths, cam_strip_w, cam_h)
+        canvas[:cam_h, :cam_strip_w] = cam_strip
+
+        # Load occupancy once
+        npz  = os.path.join(occ_dir, frame_id, 'labels.npz')
+        grid = _load_grid(npz, grid_shape)
+
+        # Pose and lane→ego transform (shared by BEV overlay and FSD panel)
+        T_inv = None
+        if pose_dict and frame_id in pose_dict:
+            T_inv = np.linalg.inv(pose_dict[frame_id]['matrix'])
+
+        lane_pts_ego = []
+        if lane_pts_world and T_inv is not None:
+            for lane_w in lane_pts_world:
+                ones = np.ones((len(lane_w), 1))
+                lane_pts_ego.append((T_inv @ np.hstack([lane_w, ones]).T).T[:, :3])
+
+        # Boxes for FSD (key is frame_id stripped of leading zeros)
+        boxes_fsd = None
+        if box_by_frame:
+            try:
+                key = str(int(frame_id))
+            except ValueError:
+                key = frame_id
+            if key in box_by_frame:
+                b = box_by_frame[key]
+                m = b['score'] >= score_thresh
+                boxes_fsd = b['boxes_lidar'][m]
+
+        # ── Panel 1: Main 3D chase-cam ──
+        img_main = render_chase_cam(grid, elev, content_h, panel_w,
+                                    voxel_style, z_offset=z_offset)
+
+        # ── Panel 2: 360 BEV ──
+        bev_grid = grid
+        if lane_pts_world and T_inv is not None:
+            bev_grid = _overlay_lanes(grid, lane_pts_world, T_inv, z_offset)
+        sz = min(panel_w, content_h)
+        bev_img  = render_bev(bev_grid, sz)
+        bev_panel = np.full((content_h, panel_w, 3), BG_COLOR, dtype=np.uint8)
+        x_off = (panel_w - sz) // 2
+        y_off = (content_h - sz) // 2
+        bev_panel[y_off:y_off + sz, x_off:x_off + sz] = bev_img
+
+        # ── Panel 3: FSD ──
+        img_fsd = render_fsd_view(panel_w, content_h,
+                                  lane_pts_ego, boxes_fsd, elev_deg=fsd_elev)
+
+        # Assemble
+        for i, (lbl, img) in enumerate(zip(labels, [img_main, bev_panel, img_fsd])):
+            x0  = i * panel_w
+            bar = np.zeros((bar_h, panel_w, 3), dtype=np.uint8)
+            cv2.putText(bar, lbl, (8, bar_h - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+            canvas[cam_h:, x0:x0 + panel_w] = np.vstack([bar, img])
+
+        for i in range(1, 3):
+            x = i * panel_w
+            cv2.line(canvas, (x, cam_h), (x, total_h), (80, 80, 80), 2)
+
+        cv2.putText(canvas, str(frame_id),
+                    (total_w - 130, total_h - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1)
 
         writer.write(canvas)
 

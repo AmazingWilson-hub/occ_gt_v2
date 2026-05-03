@@ -269,7 +269,7 @@ def main():
         # Lane lines (world → ego)
         draw_lanes(canvas, proj, lane_pts_world, T_inv, VIEW_RANGE, BACK_RANGE)
 
-        # 3D boxes (already in ego/LiDAR frame)
+        # 3D boxes (already in ego/LiDAR frame). Filter out ego self-detection.
         frame_idx = str(int(fid))
         boxes = None
         n_boxes = 0
@@ -277,10 +277,15 @@ def main():
             b = box_by_frame[frame_idx]
             mask = b['score'] >= args.score_thresh
             boxes = b['boxes_lidar'][mask]
+            # Drop boxes whose centre lies inside ego footprint (~ego self-detection)
+            if len(boxes):
+                cx, cy = boxes[:, 0], boxes[:, 1]
+                not_self = ~((cx > -1.0) & (cx < 5.5) & (np.abs(cy) < 1.5))
+                boxes = boxes[not_self]
             n_boxes = len(boxes)
             draw_boxes(canvas, proj, boxes)
 
-        # Ego
+        # Ego (drawn on top so it's always visible)
         draw_ego(canvas, proj)
 
         # HUD
