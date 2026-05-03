@@ -55,23 +55,22 @@ def make_proj(elev_deg, w, h, fov_deg=FOV_DEG, cam_height=CAM_HEIGHT, cam_back=C
     cy = int(h * 0.78)   # principal point — low horizon
 
     def proj(pts):
-        # pts: Nx3 [x_fwd, y_lat, z_up]
-        # Translate: camera is cam_back behind ego, cam_height up
-        px = pts[:, 0] + cam_back   # forward distance from camera
-        py = pts[:, 1]              # lateral (unchanged)
-        pz = pts[:, 2] - cam_height # height relative to camera
+        # pts: Nx3 [x_fwd, y_lat (+y = left), z_up]
+        # Translate to camera origin (camera is cam_back behind ego, cam_height up)
+        px = pts[:, 0] + cam_back
+        py = pts[:, 1]
+        pz = pts[:, 2] - cam_height
 
-        # Rotate by elevation (camera tilts down by elev_deg)
-        # Camera X axis = lateral, Y axis = up-in-image, Z axis = into scene
-        x_cam =  py
-        y_cam = -(px * se + pz * ce)   # negative → down in image = positive sy
-        z_cam =  px * ce - pz * se     # depth (positive = in front)
+        # Rotate world → camera (image convention: +x_cam right, +y_cam down, +z_cam fwd)
+        # Camera tilted DOWN by elev_deg around lateral axis.
+        x_cam = -py                    # +y_world = left → -x_cam (left of image)
+        y_cam = -se * px - ce * pz     # ground at z=0 (pz<0): far → negative → above cy
+        z_cam =  ce * px - se * pz     # depth into scene (positive = in front)
 
-        # Clamp depth to avoid behind-camera artifacts
-        z_cam = np.maximum(z_cam, 0.5)
+        z_cam = np.maximum(z_cam, 0.5) # clamp near-clip
 
-        sx = ( f * x_cam / z_cam + cx).astype(np.int32)
-        sy = (-f * y_cam / z_cam + cy).astype(np.int32)
+        sx = (f * x_cam / z_cam + cx).astype(np.int32)
+        sy = (f * y_cam / z_cam + cy).astype(np.int32)
         return np.stack([sx, sy], axis=1), z_cam
 
     return proj
