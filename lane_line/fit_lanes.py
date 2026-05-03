@@ -84,23 +84,41 @@ def accumulate_lanes(scene, max_frames=None):
 # Lane clustering
 # ---------------------------------------------------------------------------
 
-def cluster_by_lateral(pts, min_pts=30, gap_thresh=0.8):
+def cluster_by_lateral(pts, min_pts=30, bw=0.25):
     """
-    Split pts into lanes by finding gaps in the sorted lateral (y) distribution.
-    gap_thresh: minimum gap (m) between consecutive sorted y values to start a new cluster.
+    Split pts into lanes using KDE peak detection on the lateral (y) axis.
+    bw: KDE bandwidth in metres — smaller = more sensitive to narrow peaks.
     Returns list of Nx3 arrays sorted by mean lateral position.
     """
+    from scipy.stats import gaussian_kde
+    from scipy.signal import find_peaks
+
     ys = pts[:, 1]
+    y_min, y_max = ys.min() - 1.0, ys.max() + 1.0
+    y_grid = np.linspace(y_min, y_max, 2000)
+    dy = y_grid[1] - y_grid[0]
+
+    kde = gaussian_kde(ys, bw_method=bw / ys.std())
+    density = kde(y_grid)
+
+    # Find peaks with minimum 1 m separation
+    peaks, _ = find_peaks(density, distance=1.0 / dy, prominence=density.max() * 0.01)
+
+    if len(peaks) == 0:
+        return [pts] if len(pts) >= min_pts else []
+
+    # Cut at valley between each consecutive pair of peaks
+    cut_ys = []
+    for i in range(len(peaks) - 1):
+        lo, hi = peaks[i], peaks[i + 1]
+        valley_idx = lo + np.argmin(density[lo:hi + 1])
+        cut_ys.append(y_grid[valley_idx])
+
     order = np.argsort(ys)
-    ys_s = ys[order]
+    split_pos = np.searchsorted(ys[order], cut_ys)
+    groups = np.split(order, split_pos)
 
-    # Find large gaps between consecutive sorted y-values
-    diffs = np.diff(ys_s)
-    gap_idx = np.where(diffs > gap_thresh)[0] + 1
-    groups = np.split(order, gap_idx)
-
-    lanes = [pts[g] for g in groups if len(g) >= min_pts]
-    return lanes
+    return [pts[g] for g in groups if len(g) >= min_pts]
 
 
 # ---------------------------------------------------------------------------
