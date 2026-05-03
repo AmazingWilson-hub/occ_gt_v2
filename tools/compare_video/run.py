@@ -284,11 +284,7 @@ def main():
             lanes = json.load(f)
         lane_pts_world = []
         for lane in lanes:
-            xyz = lane['xyz']
-            lateral = np.array(xyz[0])
-            forward = np.array(xyz[1])
-            z_vals  = np.array(xyz[2])
-            lane_pts_world.append(np.stack([forward, lateral, z_vals], axis=1))
+            lane_pts_world.append(np.array(lane['points'], dtype=np.float64))
         print(f'Loaded {len(lane_pts_world)} fitted lanes from {args.lane_json}')
         if args.pose_pkl and os.path.exists(args.pose_pkl):
             with open(args.pose_pkl, 'rb') as f:

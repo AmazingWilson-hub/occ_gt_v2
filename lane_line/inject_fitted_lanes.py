@@ -47,12 +47,7 @@ def load_fitted_lanes(json_path):
         lanes = json.load(f)
     result = []
     for lane in lanes:
-        xyz = lane['xyz']
-        lateral = np.array(xyz[0])
-        forward = np.array(xyz[1])
-        z       = np.array(xyz[2])
-        # convert from 0429 storage format back to [x_fwd, y_lat, z]
-        result.append(np.stack([forward, lateral, z], axis=1))
+        result.append(np.array(lane['points'], dtype=np.float64))
     return result
 
 

@@ -268,15 +268,18 @@ def plot_fitted_only(fitted_lanes, out_path,
 
 
 def save_fitted_json(fitted_lanes, out_path):
-    """Save fitted lanes in the same xyz format as original 0429 JSON."""
+    """
+    Save fitted lanes as standard row-major format.
+    Each lane: {"lane_id": i, "points": [[x_fwd, y_lat, z], ...], "n_pts": N}
+    Coordinate system: x=forward, y=lateral, z=up (LiDAR/ego convention).
+    Points are in world frame (KISS-ICP global coordinate).
+    """
     result = []
     for i, pts in enumerate(fitted_lanes):
         # pts: Nx3 [x_fwd, y_lat, z]
         result.append({
             'lane_id': i,
-            'xyz': [pts[:, 1].tolist(),   # lateral (matches 0429 format)
-                    pts[:, 0].tolist(),   # forward
-                    pts[:, 2].tolist()],  # z
+            'points': pts.tolist(),   # [[x, y, z], ...] row-major
             'n_pts': len(pts),
         })
     with open(out_path, 'w') as f:
