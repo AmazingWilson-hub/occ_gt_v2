@@ -264,11 +264,16 @@ def _fsd_draw_box(canvas, proj, box, fill_color, edge_color, thickness=2):
 
 
 def _filter_ego_self_detection(boxes):
-    """Drop boxes whose centre lies inside ego footprint."""
+    """Drop boxes whose centre lies inside ego footprint.
+
+    Self-detection centre wanders in x as the LiDAR sees different parts of the
+    own vehicle across frames; observed range cx ∈ [-4, 3] m, |cy| < 0.5 m.
+    Width margin keeps any genuine adjacent-lane vehicle (|y|≈3.5 m) safe.
+    """
     if boxes is None or not len(boxes):
         return boxes
     cx, cy = boxes[:, 0], boxes[:, 1]
-    keep = ~((cx > -1.0) & (cx < 5.5) & (np.abs(cy) < 1.5))
+    keep = ~((cx > -5.0) & (cx < 5.5) & (np.abs(cy) < 1.5))
     return boxes[keep]
 
 

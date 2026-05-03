@@ -280,7 +280,7 @@ def main():
             # Drop boxes whose centre lies inside ego footprint (~ego self-detection)
             if len(boxes):
                 cx, cy = boxes[:, 0], boxes[:, 1]
-                not_self = ~((cx > -1.0) & (cx < 5.5) & (np.abs(cy) < 1.5))
+                not_self = ~((cx > -5.0) & (cx < 5.5) & (np.abs(cy) < 1.5))
                 boxes = boxes[not_self]
             n_boxes = len(boxes)
             draw_boxes(canvas, proj, boxes)
