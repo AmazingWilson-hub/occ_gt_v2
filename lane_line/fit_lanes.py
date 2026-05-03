@@ -203,6 +203,42 @@ def plot_comparison(raw_pts, fitted_lanes, out_path,
     print(f'  Comparison: {out_path}')
 
 
+def plot_overlay(raw_pts, lane_clusters, fitted_lanes, out_path,
+                 range_x=(-200, 200), range_y=(-15, 15)):
+    """Overlay: raw cluster points (transparent) + fitted lines on the same axes."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    LANE_COLORS = ['#E63946', '#2196F3', '#4CAF50', '#FF9800',
+                   '#9C27B0', '#00BCD4', '#FF5722', '#8BC34A']
+
+    fig, ax = plt.subplots(figsize=(18, 6), facecolor='white')
+    ax.set_facecolor('white')
+
+    for i, (cluster, fitted) in enumerate(zip(lane_clusters, fitted_lanes)):
+        c = LANE_COLORS[i % len(LANE_COLORS)]
+        # Raw cluster points (faint)
+        ax.scatter(cluster[:, 0], cluster[:, 1],
+                   s=1.0, color=c, alpha=0.2, linewidths=0, rasterized=True)
+        # Fitted line (solid, on top)
+        ax.plot(fitted[:, 0], fitted[:, 1],
+                color=c, linewidth=2.5, solid_capstyle='round',
+                label=f'Lane {i+1}')
+
+    ax.set_xlim(range_x); ax.set_ylim(range_y)
+    ax.set_aspect('equal')
+    ax.set_title('Accumulated Points + Fitted Lane Lines (Overlay)', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Forward (m)'); ax.set_ylabel('Lateral (m)')
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.legend(fontsize=11, loc='upper right')
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=200, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f'  Overlay: {out_path}')
+
+
 def plot_fitted_only(fitted_lanes, out_path,
                      range_x=(-200, 200), range_y=(-15, 15)):
     """Clean figure of fitted lanes only — for presentation."""
@@ -309,6 +345,10 @@ def main():
     plot_comparison(raw_pts, fitted_lanes,
                     os.path.join(out_dir, 'lane_fit_comparison.png'),
                     range_x=rng_x, range_y=rng_y)
+
+    plot_overlay(raw_pts, lane_clusters, fitted_lanes,
+                 os.path.join(out_dir, 'lane_overlay.png'),
+                 range_x=rng_x, range_y=rng_y)
 
     plot_fitted_only(fitted_lanes,
                      os.path.join(out_dir, 'lane_fitted_clean.png'),
