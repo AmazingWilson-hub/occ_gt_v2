@@ -84,40 +84,20 @@ def accumulate_lanes(scene, max_frames=None):
 # Lane clustering
 # ---------------------------------------------------------------------------
 
-def cluster_by_lateral(pts, min_pts=30, n_bins=200, smooth_sigma=2.0):
+def cluster_by_lateral(pts, min_pts=30, gap_thresh=0.8):
     """
-    Split pts into lanes by finding valleys in the lateral (y) histogram.
-    Returns list of Nx3 arrays, one per lane.
+    Split pts into lanes by finding gaps in the sorted lateral (y) distribution.
+    gap_thresh: minimum gap (m) between consecutive sorted y values to start a new cluster.
+    Returns list of Nx3 arrays sorted by mean lateral position.
     """
-    from scipy.ndimage import gaussian_filter1d
-    from scipy.signal import find_peaks
-
     ys = pts[:, 1]
-    y_min, y_max = ys.min(), ys.max()
-    hist, edges = np.histogram(ys, bins=n_bins)
-    centers = (edges[:-1] + edges[1:]) / 2
-    bin_w = centers[1] - centers[0]
+    order = np.argsort(ys)
+    ys_s = ys[order]
 
-    # Smooth histogram and find peaks (density modes = lane centers)
-    smoothed = gaussian_filter1d(hist.astype(float), sigma=smooth_sigma / bin_w)
-    peaks, props = find_peaks(smoothed, height=min_pts * 0.5, distance=1.0 / bin_w)
-
-    if len(peaks) == 0:
-        # Fallback: single cluster
-        return [pts] if len(pts) >= min_pts else []
-
-    # Find valleys between consecutive peaks as cut points
-    cut_ys = []
-    for i in range(len(peaks) - 1):
-        lo, hi = peaks[i], peaks[i + 1]
-        valley_idx = lo + np.argmin(smoothed[lo:hi + 1])
-        cut_ys.append(centers[valley_idx])
-
-    # Split points at cut positions
-    ys_sorted_idx = np.argsort(ys)
-    ys_sorted = ys[ys_sorted_idx]
-    split_pos = np.searchsorted(ys_sorted, cut_ys)
-    groups = np.split(ys_sorted_idx, split_pos)
+    # Find large gaps between consecutive sorted y-values
+    diffs = np.diff(ys_s)
+    gap_idx = np.where(diffs > gap_thresh)[0] + 1
+    groups = np.split(order, gap_idx)
 
     lanes = [pts[g] for g in groups if len(g) >= min_pts]
     return lanes
@@ -303,6 +283,9 @@ def main():
                         help='Sample points per fitted lane (default: 500)')
     parser.add_argument('--range_x',       type=float, nargs=2, default=[-200, 200])
     parser.add_argument('--range_y',       type=float, nargs=2, default=[-15,  15])
+    parser.add_argument('--max_x',         type=float, default=None,
+                        help='Clip accumulated points to x <= max_x before fitting '
+                             '(avoids drift at scene end, e.g. --max_x 75)')
     parser.add_argument('--out_dir',       default=None)
     args = parser.parse_args()
 
@@ -314,6 +297,9 @@ def main():
     print(f'[1/3] Accumulating lane points for {args.scene} ...')
     raw_pts = accumulate_lanes(args.scene)
     print(f'      Total raw points: {len(raw_pts):,}')
+    if args.max_x is not None:
+        raw_pts = raw_pts[raw_pts[:, 0] <= args.max_x]
+        print(f'      After x <= {args.max_x}m clip: {len(raw_pts):,} pts')
 
     # 2. Cluster into individual lanes
     print(f'[2/3] Clustering into lanes (min_pts={args.min_pts}) ...')
