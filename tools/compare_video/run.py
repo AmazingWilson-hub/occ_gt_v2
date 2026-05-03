@@ -164,6 +164,12 @@ def main():
     parser.add_argument('--z_offset', type=float, default=None,
                         help='Z offset for voxel coords (default: auto from grid_z, e.g. -2.0 for NuScenes, -3.0 for G6)')
 
+    # Fitted lane overlay (independent of occupancy npz)
+    parser.add_argument('--lane_json', default=None,
+                        help='Path to fitted_lanes.json for on-the-fly BEV overlay')
+    parser.add_argument('--pose_pkl',  default=None,
+                        help='Path to pose_dict.pkl for lane world→ego projection')
+
     args = parser.parse_args()
 
     if len(args.dirs) != len(args.labels):
@@ -269,22 +275,44 @@ def main():
     else:
         z_offset = -2.0   # default (U5/ELAN grid_z=20)
 
+    # Load fitted lane lines (optional, independent of occupancy)
+    lane_pts_world = None
+    pose_dict_lane = None
+    if args.lane_json and os.path.exists(args.lane_json):
+        import json, pickle
+        with open(args.lane_json) as f:
+            lanes = json.load(f)
+        lane_pts_world = []
+        for lane in lanes:
+            xyz = lane['xyz']
+            lateral = np.array(xyz[0])
+            forward = np.array(xyz[1])
+            z_vals  = np.array(xyz[2])
+            lane_pts_world.append(np.stack([forward, lateral, z_vals], axis=1))
+        print(f'Loaded {len(lane_pts_world)} fitted lanes from {args.lane_json}')
+        if args.pose_pkl and os.path.exists(args.pose_pkl):
+            with open(args.pose_pkl, 'rb') as f:
+                pose_dict_lane = pickle.load(f)
+            print(f'Loaded pose_dict ({len(pose_dict_lane)} frames) from {args.pose_pkl}')
+
     render_comparison_video(
-        frame_ids    = frame_ids,
-        occ_dirs     = args.dirs,
-        panel_labels = args.labels,
-        bev_dir      = args.bev_dir,
-        get_cameras  = get_cameras,
-        out_path     = args.out,
-        fps          = args.fps,
-        elev         = args.elev,
-        total_w      = args.total_w,
-        total_h      = args.total_h,
-        cam_h        = args.cam_h,
-        bev_col_w    = args.bev_col_w,
-        grid_shape   = grid_shape,
-        voxel_style  = args.voxel_style,
-        z_offset     = z_offset,
+        frame_ids      = frame_ids,
+        occ_dirs       = args.dirs,
+        panel_labels   = args.labels,
+        bev_dir        = args.bev_dir,
+        get_cameras    = get_cameras,
+        out_path       = args.out,
+        fps            = args.fps,
+        elev           = args.elev,
+        total_w        = args.total_w,
+        total_h        = args.total_h,
+        cam_h          = args.cam_h,
+        bev_col_w      = args.bev_col_w,
+        grid_shape     = grid_shape,
+        voxel_style    = args.voxel_style,
+        z_offset       = z_offset,
+        lane_pts_world = lane_pts_world,
+        pose_dict      = pose_dict_lane,
     )
 
 

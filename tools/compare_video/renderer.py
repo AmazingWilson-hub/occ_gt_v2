@@ -249,6 +249,35 @@ def _render_cam_strip(cam_paths, strip_w, strip_h):
 # Main render function
 # ---------------------------------------------------------------------------
 
+def _overlay_lanes(grid, lane_pts_world, T_inv, z_offset):
+    """
+    Transform world-frame lane points to ego frame, voxelize, and overlay
+    label 18 (lane line) on a copy of grid — only overwriting road (11) or free (17).
+    Returns modified grid copy.
+    """
+    GT_BOUNDS = np.array([-40.0, -40.0, -3.0])
+    GT_VOXEL  = 0.4
+    GT_GRID   = grid.shape
+    LBL_ROAD, LBL_FREE, LBL_LANE = 11, 17, 18
+
+    occ = grid.copy()
+    for lane_w in lane_pts_world:
+        ones = np.ones((len(lane_w), 1))
+        pts_ego = (T_inv @ np.hstack([lane_w, ones]).T).T[:, :3]
+        ix = ((pts_ego[:, 0] - GT_BOUNDS[0]) / GT_VOXEL).astype(np.int32)
+        iy = ((pts_ego[:, 1] - GT_BOUNDS[1]) / GT_VOXEL).astype(np.int32)
+        iz = ((pts_ego[:, 2] - GT_BOUNDS[2]) / GT_VOXEL).astype(np.int32)
+        valid = ((ix >= 0) & (ix < GT_GRID[0]) &
+                 (iy >= 0) & (iy < GT_GRID[1]) &
+                 (iz >= 0) & (iz < GT_GRID[2]))
+        ix, iy, iz = ix[valid], iy[valid], iz[valid]
+        for dz in range(3):
+            iz_c = np.clip(iz + dz, 0, GT_GRID[2] - 1)
+            can  = np.isin(occ[ix, iy, iz_c], [LBL_FREE, LBL_ROAD])
+            occ[ix[can], iy[can], iz_c[can]] = LBL_LANE
+    return occ
+
+
 def render_comparison_video(
     frame_ids,
     occ_dirs,
@@ -266,6 +295,8 @@ def render_comparison_video(
     grid_shape=(200, 200, 20),
     voxel_style='flat',
     z_offset=-2.0,
+    lane_pts_world=None,   # list of Nx3 arrays in world frame (fitted lanes)
+    pose_dict=None,        # {frame_id: {'matrix': 4x4}} for lane projection
 ):
     """
     Render a comparison video.
@@ -338,7 +369,12 @@ def render_comparison_video(
 
         # --- BEV panel ---
         bev_npz  = os.path.join(bev_dir, frame_id, 'labels.npz')
-        bev_img  = render_bev(_load_grid(bev_npz, grid_shape), bev_size)
+        bev_grid = _load_grid(bev_npz, grid_shape)
+        # Overlay fitted lane lines on-the-fly (no baking into npz)
+        if lane_pts_world and pose_dict and frame_id in pose_dict:
+            T_inv    = np.linalg.inv(pose_dict[frame_id]['matrix'])
+            bev_grid = _overlay_lanes(bev_grid, lane_pts_world, T_inv, z_offset)
+        bev_img  = render_bev(bev_grid, bev_size)
         if not os.path.exists(bev_npz):
             cv2.putText(bev_img, 'No Data', (bev_size // 2 - 60, bev_size // 2),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (80, 80, 80), 2)
