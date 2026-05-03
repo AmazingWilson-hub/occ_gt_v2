@@ -182,7 +182,7 @@ def main():
 
     args = parser.parse_args()
 
-    if len(args.dirs) != len(args.labels):
+    if not args.three_view and len(args.dirs) != len(args.labels):
         parser.error('--dirs and --labels must have the same number of entries')
 
     # Collect frame IDs from first dir
@@ -302,8 +302,11 @@ def main():
                 pose_dict_lane = pickle.load(f)
             print(f'Loaded pose_dict ({len(pose_dict_lane)} frames) from {args.pose_pkl}')
 
-    # Three-view layout: Main 3D | 360 BEV | FSD
+    # Three-view layout: Main | 360 | FSD
     if args.three_view:
+        if len(args.dirs) < 2:
+            parser.error('--three_view requires --dirs to provide TWO occupancy dirs '
+                         '(main_seg_dir 360_seg_dir)')
         box_by_frame = None
         if args.box_pkl and os.path.exists(args.box_pkl):
             import pickle
@@ -312,9 +315,13 @@ def main():
             box_by_frame = {str(int(b['frame_id'])): b for b in box_data}
             print(f'Loaded {len(box_by_frame)} box frames from {args.box_pkl}')
 
+        # Three-view defaults to shaded voxels unless user overrode it
+        voxel_style = 'shaded' if args.voxel_style == 'flat' else args.voxel_style
+
         render_three_view_video(
             frame_ids      = frame_ids,
-            occ_dir        = args.dirs[0],
+            main_occ_dir   = args.dirs[0],
+            occ_360_dir    = args.dirs[1],
             get_cameras    = get_cameras,
             out_path       = args.out,
             box_by_frame   = box_by_frame,
@@ -328,7 +335,7 @@ def main():
             total_h        = args.total_h,
             cam_h          = args.cam_h,
             grid_shape     = grid_shape,
-            voxel_style    = args.voxel_style,
+            voxel_style    = voxel_style,
             z_offset       = z_offset,
         )
         return

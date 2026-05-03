@@ -531,7 +531,8 @@ def render_comparison_video(
 
 def render_three_view_video(
     frame_ids,
-    occ_dir,
+    main_occ_dir,
+    occ_360_dir,
     get_cameras,
     out_path,
     box_by_frame=None,
@@ -546,13 +547,19 @@ def render_three_view_video(
     cam_h=500,
     bar_h=36,
     grid_shape=(200, 200, 20),
-    voxel_style='flat',
+    voxel_style='shaded',
     z_offset=-2.0,
 ):
+    """
+    Three-view layout (top: 6-cam strip; bottom: 3 panels)
+      Panel 1 (Main)   : chase-cam render of main_occ_dir (front-only semantics)
+      Panel 2 (360)    : chase-cam render of occ_360_dir  (360° semantics)
+      Panel 3 (FSD)    : Tesla FSD-style perspective with lanes + boxes + ego
+    """
     panel_w   = total_w // 3
     occ_h     = total_h - cam_h
     content_h = occ_h - bar_h
-    cam_strip_w = panel_w * 3   # may be slightly less than total_w due to int div
+    cam_strip_w = panel_w * 3
 
     os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -561,34 +568,33 @@ def render_three_view_video(
         raise RuntimeError(f"VideoWriter failed to open: {out_path}")
 
     print(f"Three-view canvas {total_w}x{total_h} | cam_h={cam_h} "
-          f"panels=3 x {panel_w}x{content_h}")
+          f"panels=3 x {panel_w}x{content_h} | voxel_style={voxel_style}")
 
-    labels = ['Main', '360 BEV', 'FSD']
+    labels = ['Main', '360', 'FSD']
 
     for frame_id in tqdm(frame_ids, desc='Rendering'):
         canvas = np.zeros((total_h, total_w, 3), dtype=np.uint8)
 
-        # Camera strip
+        # ── Camera strip ──
         cam_paths = get_cameras(frame_id) or {}
         cam_strip = _render_cam_strip(cam_paths, cam_strip_w, cam_h)
         canvas[:cam_h, :cam_strip_w] = cam_strip
 
-        # Load occupancy once
-        npz  = os.path.join(occ_dir, frame_id, 'labels.npz')
-        grid = _load_grid(npz, grid_shape)
+        # ── Load both occupancy grids ──
+        main_grid = _load_grid(os.path.join(main_occ_dir, frame_id, 'labels.npz'),
+                               grid_shape)
+        grid_360  = _load_grid(os.path.join(occ_360_dir,  frame_id, 'labels.npz'),
+                               grid_shape)
 
-        # Pose and lane→ego transform (shared by BEV overlay and FSD panel)
-        T_inv = None
-        if pose_dict and frame_id in pose_dict:
-            T_inv = np.linalg.inv(pose_dict[frame_id]['matrix'])
-
+        # ── Pose & lane→ego (only needed for FSD panel) ──
         lane_pts_ego = []
-        if lane_pts_world and T_inv is not None:
+        if lane_pts_world and pose_dict and frame_id in pose_dict:
+            T_inv = np.linalg.inv(pose_dict[frame_id]['matrix'])
             for lane_w in lane_pts_world:
                 ones = np.ones((len(lane_w), 1))
                 lane_pts_ego.append((T_inv @ np.hstack([lane_w, ones]).T).T[:, :3])
 
-        # Boxes for FSD (key is frame_id stripped of leading zeros)
+        # ── Boxes for FSD ──
         boxes_fsd = None
         if box_by_frame:
             try:
@@ -600,27 +606,15 @@ def render_three_view_video(
                 m = b['score'] >= score_thresh
                 boxes_fsd = b['boxes_lidar'][m]
 
-        # ── Panel 1: Main 3D chase-cam ──
-        img_main = render_chase_cam(grid, elev, content_h, panel_w,
+        # ── Render the three panels ──
+        img_main = render_chase_cam(main_grid, elev, content_h, panel_w,
                                     voxel_style, z_offset=z_offset)
+        img_360  = render_chase_cam(grid_360,  elev, content_h, panel_w,
+                                    voxel_style, z_offset=z_offset)
+        img_fsd  = render_fsd_view(panel_w, content_h,
+                                   lane_pts_ego, boxes_fsd, elev_deg=fsd_elev)
 
-        # ── Panel 2: 360 BEV ──
-        bev_grid = grid
-        if lane_pts_world and T_inv is not None:
-            bev_grid = _overlay_lanes(grid, lane_pts_world, T_inv, z_offset)
-        sz = min(panel_w, content_h)
-        bev_img  = render_bev(bev_grid, sz)
-        bev_panel = np.full((content_h, panel_w, 3), BG_COLOR, dtype=np.uint8)
-        x_off = (panel_w - sz) // 2
-        y_off = (content_h - sz) // 2
-        bev_panel[y_off:y_off + sz, x_off:x_off + sz] = bev_img
-
-        # ── Panel 3: FSD ──
-        img_fsd = render_fsd_view(panel_w, content_h,
-                                  lane_pts_ego, boxes_fsd, elev_deg=fsd_elev)
-
-        # Assemble
-        for i, (lbl, img) in enumerate(zip(labels, [img_main, bev_panel, img_fsd])):
+        for i, (lbl, img) in enumerate(zip(labels, [img_main, img_360, img_fsd])):
             x0  = i * panel_w
             bar = np.zeros((bar_h, panel_w, 3), dtype=np.uint8)
             cv2.putText(bar, lbl, (8, bar_h - 8),
