@@ -508,21 +508,22 @@ def render_comparison_video(
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1)
 
         # --- BEV panel ---
-        bev_npz  = os.path.join(bev_dir, frame_id, 'labels.npz')
-        bev_grid = _load_grid(bev_npz, grid_shape)
-        # Overlay fitted lane lines on-the-fly (no baking into npz)
-        if lane_pts_world and pose_dict and frame_id in pose_dict:
-            T_inv    = np.linalg.inv(pose_dict[frame_id]['matrix'])
-            bev_grid = _overlay_lanes(bev_grid, lane_pts_world, T_inv, z_offset)
-        bev_img  = render_bev(bev_grid, bev_size)
-        if not os.path.exists(bev_npz):
-            cv2.putText(bev_img, 'No Data', (bev_size // 2 - 60, bev_size // 2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (80, 80, 80), 2)
-        bev_col = np.zeros((total_h, bev_col_w, 3), dtype=np.uint8)
-        y_off   = (total_h - bev_size) // 2
-        bev_col[y_off:y_off + bev_size, :bev_size] = bev_img
-        cv2.line(bev_col, (0, 0), (0, total_h), (80, 80, 80), 2)
-        canvas[:, main_w:] = bev_col
+        if bev_col_w > 0:
+            bev_npz  = os.path.join(bev_dir, frame_id, 'labels.npz')
+            bev_grid = _load_grid(bev_npz, grid_shape)
+            # Overlay fitted lane lines on-the-fly (no baking into npz)
+            if lane_pts_world and pose_dict and frame_id in pose_dict:
+                T_inv    = np.linalg.inv(pose_dict[frame_id]['matrix'])
+                bev_grid = _overlay_lanes(bev_grid, lane_pts_world, T_inv, z_offset)
+            bev_img  = render_bev(bev_grid, bev_size)
+            if not os.path.exists(bev_npz):
+                cv2.putText(bev_img, 'No Data', (bev_size // 2 - 60, bev_size // 2),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (80, 80, 80), 2)
+            bev_col = np.zeros((total_h, bev_col_w, 3), dtype=np.uint8)
+            y_off   = (total_h - bev_size) // 2
+            bev_col[y_off:y_off + bev_size, :bev_size] = bev_img
+            cv2.line(bev_col, (0, 0), (0, total_h), (80, 80, 80), 2)
+            canvas[:, main_w:] = bev_col
 
         writer.write(canvas)
 

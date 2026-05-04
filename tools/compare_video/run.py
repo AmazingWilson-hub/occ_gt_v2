@@ -127,8 +127,8 @@ def main():
                         help='One occupancy output dir per panel (scene level)')
     parser.add_argument('--labels',   nargs='+', required=True,
                         help='Label for each panel (same count as --dirs)')
-    parser.add_argument('--bev_dir',  required=True,
-                        help='Occupancy dir used for BEV panel')
+    parser.add_argument('--bev_dir',  default='',
+                        help='Occupancy dir used for BEV panel (empty + --bev_col_w 0 = no BEV)')
     parser.add_argument('--out',      default=None,
                         help='Output .mp4 path (auto-generated if not set)')
 
