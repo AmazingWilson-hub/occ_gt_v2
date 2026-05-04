@@ -625,7 +625,15 @@ def main():
                         help='Semantic PCD subfolder name (e.g. colored_pcd_main, colored_pcd_6view)')
     parser.add_argument('--out_subdir',  type=str, default=None,
                         help='Override output subdirectory name for semantic mode (e.g. seg_main, seg_360)')
+    parser.add_argument('--no_fix',      action='store_true',
+                        help='Disable BOX_Z_SHIFT and ego-box filtering (pre-fix baseline)')
     args = parser.parse_args()
+
+    global BOX_Z_SHIFT, EGO_BOX_RADIUS
+    if args.no_fix:
+        BOX_Z_SHIFT = 0.0
+        EGO_BOX_RADIUS = 0.0
+        print("[INFO] --no_fix: pre-fix baseline (no Z shift, no ego filter)")
 
     scene_path = os.path.join(args.data_root, args.scene)
 
