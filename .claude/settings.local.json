@@ -38,7 +38,8 @@
       "Bash(chmod +x /data2/t113c52027/occ_gt_v2/autopush/autopush.sh)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('lanes:', len\\(d['lane_lines']\\)\\); [print\\(f'  lane track_id={l[\\\\\"track_id\\\\\"]} points={len\\(l[\\\\\"xyz\\\\\"][0]\\)} uv_pts={len\\(l[\\\\\"uv\\\\\"][0]\\)}'\\) for l in d['lane_lines']]\")",
       "Bash(grep -v '/$')",
-      "Bash(read d *)"
+      "Bash(read d *)",
+      "Bash(fc-list :lang=zh-tw)"
     ]
   }
 }

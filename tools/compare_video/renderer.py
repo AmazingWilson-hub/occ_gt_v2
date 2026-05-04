@@ -68,6 +68,26 @@ _EGO_EZ   = _eg[:, 2]   # raw z indices, z_offset applied at render time
 
 _BLOCK_CACHE = {}   # block_size -> (offsets, bf)
 
+
+_CJK_FONT_PATH = '/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc'
+_FONT_CACHE = {}
+
+def _draw_label(img, text, pos, font_size=22, color=(0, 255, 255)):
+    """Draw label on img. Auto-uses PIL with CJK font if non-ASCII present."""
+    if all(ord(c) < 128 for c in text):
+        cv2.putText(img, text, pos, cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
+        return
+    from PIL import Image, ImageDraw, ImageFont
+    if font_size not in _FONT_CACHE:
+        _FONT_CACHE[font_size] = ImageFont.truetype(_CJK_FONT_PATH, font_size)
+    font = _FONT_CACHE[font_size]
+    pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil)
+    # cv2 pos is bottom-left of text; PIL is top-left → adjust
+    x, y = pos
+    draw.text((x, y - font_size), text, font=font, fill=(color[2], color[1], color[0]))
+    img[:] = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+
 CAM_6_KEYS = ['FRONT_LEFT', 'FRONT', 'FRONT_RIGHT',
                'BACK_LEFT',  'BACK',  'BACK_RIGHT']
 CAM_6_LABELS = ['Front Left', 'Front', 'Front Right',
@@ -493,8 +513,7 @@ def render_comparison_video(
                 cv2.putText(img, 'No Data', (panel_w // 2 - 60, content_h // 2),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (80, 80, 80), 2)
             bar = np.zeros((bar_h, panel_w, 3), dtype=np.uint8)
-            cv2.putText(bar, lbl, (8, bar_h - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+            _draw_label(bar, lbl, (8, bar_h - 8))
             canvas[cam_h:, x0:x0 + panel_w] = np.vstack([bar, img])
 
         # Dividers between panels
@@ -623,8 +642,7 @@ def render_three_view_video(
         for i, (lbl, img) in enumerate(zip(labels, [img_main, img_360, img_fsd])):
             x0  = i * panel_w
             bar = np.zeros((bar_h, panel_w, 3), dtype=np.uint8)
-            cv2.putText(bar, lbl, (8, bar_h - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+            _draw_label(bar, lbl, (8, bar_h - 8))
             canvas[cam_h:, x0:x0 + panel_w] = np.vstack([bar, img])
 
         for i in range(1, 3):
