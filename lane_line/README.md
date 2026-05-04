@@ -79,6 +79,7 @@ python3 lane_line/accumulate_lanes.py \
 
 ### `fit_lanes.py`
 對疊合後的點雲進行車道線分群與多項式擬合，輸出 `fitted_lanes.json`。
+**詳細演算法說明見 [FITTING.md](FITTING.md)。**
 
 ```bash
 python3 lane_line/fit_lanes.py \
