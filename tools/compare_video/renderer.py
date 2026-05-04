@@ -69,7 +69,7 @@ _EGO_EZ   = _eg[:, 2]   # raw z indices, z_offset applied at render time
 _BLOCK_CACHE = {}   # block_size -> (offsets, bf)
 
 
-_CJK_FONT_PATH = '/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc'
+_CJK_FONT_PATH = os.path.join(os.path.dirname(__file__), 'NotoSerifCJK-Bold.ttc')
 _FONT_CACHE = {}
 
 def _draw_label(img, text, pos, font_size=22, color=(0, 255, 255)):

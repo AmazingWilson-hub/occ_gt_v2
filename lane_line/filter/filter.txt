@@ -1,0 +1,91 @@
+    def ground_plane(self, point_cloud, max_distance=-1.6):
+        """地面平面擬合和點雲分割"""
+        points = np.asarray(point_cloud.points)
+        
+        # 使用RANSAC擬合地面平面
+        ransac = linear_model.RANSACRegressor(
+            linear_model.LinearRegression(),
+            min_samples=5,
+            residual_threshold=0.2,
+            max_trials=150
+        )
+
+        X = points[:, [0, 1]]  # X和Y座標
+        y = points[:, 2]  # Z座標
+        # Z = aX + bY + c
+        try:
+            ransac.fit(X, y)
+            inlier_mask = ransac.inlier_mask_
+        except:
+            print("使用簡易地面擬合")
+            inlier_mask = points[:, 2] < max_distance
+        
+        # 創建地面和非地面點雲
+        ground_pc = o3d.geometry.PointCloud()
+        ground_pc.points = o3d.utility.Vector3dVector(points[inlier_mask])
+
+        non_ground_pc = o3d.geometry.PointCloud()
+        non_ground_pc.points = o3d.utility.Vector3dVector(points[~inlier_mask])
+        
+        if hasattr(point_cloud, 'colors') and len(point_cloud.colors) > 0:
+            colors = np.asarray(point_cloud.colors)
+            ground_pc.colors = o3d.utility.Vector3dVector(colors[inlier_mask])
+            non_ground_pc.colors = o3d.utility.Vector3dVector(colors[~inlier_mask])
+        
+        # 強度過濾
+        removed_pc = o3d.geometry.PointCloud()
+        
+        filtered_pc, removed_pc = self.filter_ground_intensity(ground_pc)
+        
+        return filtered_pc, ground_pc, non_ground_pc, removed_pc
+    
+    def filter_ground_intensity(self, ground_pc):
+        """基於強度的地面點過濾"""
+        points = np.asarray(ground_pc.points)
+        has_colors = hasattr(ground_pc, 'colors') and len(ground_pc.colors) > 0
+        
+        keep_mask = np.ones(len(points), dtype=bool)
+        removed_pc = o3d.geometry.PointCloud()
+
+        if has_colors:
+            colors = np.asarray(ground_pc.colors)
+            intensities = colors[:, 0]
+            
+            # 使用KMeans進行強度聚類
+            from sklearn.cluster import KMeans
+            intensity_range = np.max(intensities) - np.min(intensities)
+            print(f"強度範圍: {intensity_range}") 
+            
+            if intensity_range >= 0.1:
+                # 聚類
+                n_clusters = 2 if intensity_range > 0.4 else 3
+                kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                cluster_labels = kmeans.fit_predict(intensities.reshape(-1, 1))
+                cluster_counts = np.bincount(cluster_labels)
+                largest_cluster = np.argmax(cluster_counts)
+                
+                # 保留非最大聚類的點
+                keep_mask = cluster_labels != largest_cluster
+                
+                # 建立被移除的點雲 (僅包含強度過濾移除的部分)
+                removed_pc.points = o3d.utility.Vector3dVector(points[~keep_mask])
+                removed_pc.colors = o3d.utility.Vector3dVector(colors[~keep_mask])
+                
+                print(f"強度過濾: 保留 {np.sum(keep_mask)}/{len(points)} 個點")
+            else:
+                print("強度範圍過小，跳過強度聚類過濾")
+        else:
+            print("無顏色資訊，跳過強度聚類過濾")
+
+        # 建立過濾後的點雲 (準備進入幾何過濾)
+        filtered_pc = o3d.geometry.PointCloud()
+        filtered_pc.points = o3d.utility.Vector3dVector(points[keep_mask])
+        if has_colors:
+            filtered_pc.colors = o3d.utility.Vector3dVector(colors[keep_mask])
+        
+        # 即使強度過濾被跳過，也要進行 mark_judge (幾何圖案過濾)
+        # from mark_filter import mark_judge
+        # filtered_pc = mark_judge(filtered_pc, dtod=1.0)
+        # print(f"圖案過濾後: 保留 {len(filtered_pc.points)} 個點")
+        
+        return filtered_pc, removed_pc
