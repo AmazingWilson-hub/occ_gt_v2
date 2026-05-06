@@ -45,33 +45,34 @@ def world_to_ego(pts_world, T_inv):
     return (T_inv @ np.hstack([pts_world, ones]).T).T[:, :3]
 
 
-def project_to_image(pts_lidar, R_cam, t_cam, K, D, W, H):
-    """Project LiDAR-frame points to pixel coordinates.
+def project_and_draw_lane(img, pts_lidar, R_cam, t_cam, K, D, W, H, color, thickness):
+    """Project and draw a lane line segment-by-segment.
 
-    Returns Nx2 int32 pixel array (only in-front, in-bounds points).
+    Only draws a segment when BOTH endpoints are in front of the camera
+    and within image bounds — prevents hooks at boundary crossings.
     """
     pts_cam = (R_cam @ pts_lidar.T).T + t_cam   # Nx3 camera frame
-    front = pts_cam[:, 2] > 0.1                  # keep points in front
-    if not front.any():
-        return np.zeros((0, 2), dtype=np.int32)
 
-    imgpts, _ = cv2.projectPoints(
-        pts_cam[front].astype(np.float64),
-        np.zeros(3), np.zeros(3),
-        K, D
-    )
-    uvs = imgpts.reshape(-1, 2)
+    # Project all points at once
+    uvs = np.full((len(pts_lidar), 2), -1, dtype=np.float32)
+    front = pts_cam[:, 2] > 0.1
+    if front.any():
+        imgpts, _ = cv2.projectPoints(
+            pts_cam[front].astype(np.float64),
+            np.zeros(3), np.zeros(3), K, D
+        )
+        uvs[front] = imgpts.reshape(-1, 2)
 
-    in_bounds = ((uvs[:, 0] >= 0) & (uvs[:, 0] < W) &
+    in_bounds = (front &
+                 (uvs[:, 0] >= 0) & (uvs[:, 0] < W) &
                  (uvs[:, 1] >= 0) & (uvs[:, 1] < H))
-    return uvs[in_bounds].astype(np.int32)
 
-
-def draw_lane(img, uvs, color, thickness):
-    if len(uvs) < 2:
-        return
-    for i in range(len(uvs) - 1):
-        cv2.line(img, tuple(uvs[i]), tuple(uvs[i + 1]), color, thickness, cv2.LINE_AA)
+    for i in range(len(pts_lidar) - 1):
+        if in_bounds[i] and in_bounds[i + 1]:
+            cv2.line(img,
+                     tuple(uvs[i].astype(np.int32)),
+                     tuple(uvs[i + 1].astype(np.int32)),
+                     color, thickness, cv2.LINE_AA)
 
 
 def main():
@@ -149,9 +150,9 @@ def main():
 
         for li, pts_world in enumerate(lane_pts_world):
             pts_ego = world_to_ego(pts_world, T_inv)
-            uvs     = project_to_image(pts_ego, R_cam, t_cam, K, D, W, H)
             color   = LANE_COLORS[li % len(LANE_COLORS)]
-            draw_lane(img, uvs, color, args.thickness)
+            project_and_draw_lane(img, pts_ego, R_cam, t_cam, K, D, W, H,
+                                  color, args.thickness)
 
         writer.write(img)
 
