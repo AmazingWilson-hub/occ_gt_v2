@@ -51,8 +51,6 @@ def project_and_draw_lane(img, pts_lidar, R_cam, t_cam, K, D, W, H, color, thick
     Only draws a segment when BOTH endpoints are in front of the camera
     and within image bounds — prevents hooks at boundary crossings.
     """
-    # fitted_lanes uses y=right-positive; camera calib uses y=left-positive → flip y
-    pts_lidar = pts_lidar * np.array([1, -1, 1])
     pts_cam = (R_cam @ pts_lidar.T).T + t_cam   # Nx3 camera frame
 
     # Project all points at once.
