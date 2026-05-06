@@ -62,27 +62,42 @@ def project_pinhole(pts_cam, K, W, H):
 
 # ── Lane filter ───────────────────────────────────────────────────────────────
 
-def filter_lane_pts(pts, intensity):
+def filter_lane_pts(pts, intensity, lidarseg=None, road_label=24):
+    """
+    Same method as G6: ground plane → KMeans intensity → remove asphalt cluster.
+    If lidarseg is provided, use it to find ground points directly (more reliable
+    than RANSAC for NuScenes' sparse 32-beam LiDAR).
+    """
     from sklearn import linear_model
     from sklearn.cluster import KMeans
 
+    # ROI crop
     mask = ((pts[:, 0] > 2)   & (pts[:, 0] < 60) &
             (pts[:, 1] > -10) & (pts[:, 1] < 10))
-    pts  = pts[mask];  intensity = intensity[mask]
+    pts   = pts[mask]
+    inty  = intensity[mask]
+    seg   = lidarseg[mask] if lidarseg is not None else None
+
     if len(pts) < 20:
         return np.zeros((0, 3))
 
-    try:
-        ransac = linear_model.RANSACRegressor(
-            linear_model.LinearRegression(),
-            min_samples=5, residual_threshold=0.2, max_trials=150)
-        ransac.fit(pts[:, :2], pts[:, 2])
-        ground = ransac.inlier_mask_
-    except Exception:
-        ground = pts[:, 2] < -1.0
+    # Ground point selection
+    if seg is not None:
+        # Use lidarseg driveable_surface label directly
+        ground = seg == road_label
+    else:
+        # Fallback: RANSAC plane fit
+        try:
+            ransac = linear_model.RANSACRegressor(
+                linear_model.LinearRegression(),
+                min_samples=5, residual_threshold=0.2, max_trials=150)
+            ransac.fit(pts[:, :2], pts[:, 2])
+            ground = ransac.inlier_mask_
+        except Exception:
+            ground = pts[:, 2] < (pts[:, 2].min() + 0.5)
 
     pts_g  = pts[ground]
-    inty_g = intensity[ground] / 255.0
+    inty_g = inty[ground] / 255.0
     if len(pts_g) < 10:
         return np.zeros((0, 3))
 
@@ -211,7 +226,15 @@ def main():
         pts_l    = pc.points[:3, :].T
         inty     = pc.points[3, :]
 
-        lane_ego = filter_lane_pts(pts_l, inty)   # in LiDAR frame (≈ego)
+        # Load lidarseg labels if available
+        try:
+            seg_file = os.path.join(nusc.dataroot,
+                                    nusc.get('lidarseg', sd_l['token'])['filename'])
+            lidarseg = np.fromfile(seg_file, dtype=np.uint8)
+        except Exception:
+            lidarseg = None
+
+        lane_ego = filter_lane_pts(pts_l, inty, lidarseg)   # in LiDAR frame (≈ego)
 
         # LiDAR → world for accumulation
         T_l2w = make_T(ep_l['rotation'], ep_l['translation']) @ make_T(cs_l['rotation'], cs_l['translation'])
