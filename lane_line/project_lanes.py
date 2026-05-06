@@ -55,9 +55,15 @@ def project_and_draw_lane(img, pts_lidar, R_cam, t_cam, K, D, W, H, color, thick
     pts_lidar = pts_lidar * np.array([1, -1, 1])
     pts_cam = (R_cam @ pts_lidar.T).T + t_cam   # Nx3 camera frame
 
-    # Project all points at once
+    # Project all points at once.
+    # Also exclude points beyond the valid distortion range: Brown-Conrady with
+    # k1=-0.468 flips sign at r≈2.1 (≈64°), projecting wide-angle points to
+    # the wrong side of the image and causing hooks.
     uvs = np.full((len(pts_lidar), 2), -1, dtype=np.float32)
-    front = pts_cam[:, 2] > 0.1
+    z = pts_cam[:, 2]
+    tan_x = np.abs(pts_cam[:, 0]) / np.maximum(z, 1e-6)
+    tan_y = np.abs(pts_cam[:, 1]) / np.maximum(z, 1e-6)
+    front = (z > 0.1) & (tan_x < 1.8) & (tan_y < 1.8)
     if front.any():
         imgpts, _ = cv2.projectPoints(
             pts_cam[front].astype(np.float64),
