@@ -160,6 +160,11 @@ def main():
             project_and_draw_lane(img, pts_ego, R_cam, t_cam, K, D, W, H,
                                   color, args.thickness)
 
+        cv2.putText(img, f'Frame {fid}', (30, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.8, (255, 255, 255), 5, cv2.LINE_AA)
+        cv2.putText(img, f'Frame {fid}', (30, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.8, (0, 0, 0), 2, cv2.LINE_AA)
+
         writer.write(img)
 
     writer.release()
