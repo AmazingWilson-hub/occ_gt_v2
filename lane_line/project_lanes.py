@@ -61,7 +61,7 @@ def project_and_draw_lane(img, pts_lidar, R_cam, t_cam, K, D, W, H, color, thick
     z = pts_cam[:, 2]
     tan_x = np.abs(pts_cam[:, 0]) / np.maximum(z, 1e-6)
     tan_y = np.abs(pts_cam[:, 1]) / np.maximum(z, 1e-6)
-    front = (z > 0.1) & (tan_x < 1.8) & (tan_y < 1.8)
+    front = (z > 0.1) & (tan_x < 1.2) & (tan_y < 1.2)
     if front.any():
         imgpts, _ = cv2.projectPoints(
             pts_cam[front].astype(np.float64),
@@ -156,6 +156,13 @@ def main():
 
         for li, pts_world in enumerate(lane_pts_world):
             pts_ego = world_to_ego(pts_world, T_inv)
+            # Only keep points in a sane ego-frame window to prevent
+            # polynomial extrapolation causing hooks at the extremes.
+            in_range = ((pts_ego[:, 0] > -5) & (pts_ego[:, 0] < 80) &
+                        (np.abs(pts_ego[:, 1]) < 15))
+            pts_ego = pts_ego[in_range]
+            if len(pts_ego) < 2:
+                continue
             color   = LANE_COLORS[li % len(LANE_COLORS)]
             project_and_draw_lane(img, pts_ego, R_cam, t_cam, K, D, W, H,
                                   color, args.thickness)
