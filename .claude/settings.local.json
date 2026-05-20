@@ -42,7 +42,10 @@
       "Bash(fc-list :lang=zh-tw)",
       "Bash(ls /tmp/lane_proj_frame30.png && cp /tmp/lane_proj_frame30.png /data2/t113c52027/occ_gt_v2/lane_proj_frame30.png)",
       "Bash(find /data2/t113c52027 /home/t113c52027 -name \"v1.0-*\" -type d 2>/dev/null | head -5 && find /data2/t113c52027 /home/t113c52027 -name \"nuscenes*\" -type d 2>/dev/null | head -10)",
-      "Read(//data2/t113c52027/**)"
+      "Read(//data2/t113c52027/**)",
+      "Bash(ln -s /data1/ELAN/ /home/t113c52027/t113c52027/occ_gt_v2/data/ELAN)",
+      "Bash(ls -la /home/t113c52027/t113c52027/occ_gt_v2/data/ELAN)",
+      "Read(//data1/ELAN/**)"
     ],
     "additionalDirectories": [
       "/tmp"
